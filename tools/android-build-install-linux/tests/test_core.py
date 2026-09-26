@@ -30,6 +30,36 @@ class CoreTests(unittest.TestCase):
             (other / "feature-debug.apk").write_bytes(b"b")
             self.assertEqual(core.deterministic_apk(str(root), root, core.Preferences()), conventional)
 
+    def test_preferred_release_apk_is_honored_even_with_debug_output(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            debug = root / "app" / "build" / "outputs" / "apk" / "debug"
+            release = root / "app" / "build" / "outputs" / "apk" / "release"
+            debug.mkdir(parents=True)
+            release.mkdir(parents=True)
+            (debug / "app-debug.apk").write_bytes(b"debug")
+            preferred = release / "app-release.apk"
+            preferred.write_bytes(b"release")
+            pref = core.Preferences(preferred_apk=str(preferred))
+            self.assertEqual(core.deterministic_apk(str(root), root, pref), preferred)
+
+    def test_git_fetch_failure_is_not_silently_ignored(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            subprocess = __import__("subprocess")
+            subprocess.run(["git", "init", str(root)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.com"], check=True)
+            subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
+            (root / "README").write_text("x", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "README"], check=True)
+            subprocess.run(["git", "-C", str(root), "commit", "-m", "init"], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "/definitely/missing/repo"], check=True)
+            branch = subprocess.run(["git", "-C", str(root), "branch", "--show-current"], check=True, capture_output=True, text=True).stdout.strip()
+            subprocess.run(["git", "-C", str(root), "config", f"branch.{branch}.remote", "origin"], check=True)
+            subprocess.run(["git", "-C", str(root), "config", f"branch.{branch}.merge", f"refs/heads/{branch}"], check=True)
+            with self.assertRaises(core.ToolError):
+                core.git_status(str(root), fetch=True)
+
     def test_xdg_paths(self):
         with tempfile.TemporaryDirectory() as td:
             with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": td, "XDG_STATE_HOME": td}, clear=False):
