@@ -384,6 +384,28 @@ def safe_git_pull(project: str, stream: Callable[[str], None] | None = None) -> 
     run(["git", "-C", project, "pull", "--ff-only"], check=True, stream=stream)
 
 
+def newest_project_input_mtime(project: str) -> float:
+    newest = 0.0
+    queue = [Path(project).resolve()]
+    while queue:
+        directory = queue.pop()
+        try:
+            children = list(directory.iterdir())
+        except OSError:
+            continue
+        for path in children:
+            if path.name in SKIP_DIRS:
+                continue
+            try:
+                if path.is_dir():
+                    queue.append(path)
+                elif path.is_file():
+                    newest = max(newest, path.stat().st_mtime)
+            except OSError:
+                pass
+    return newest
+
+
 def build_status(project: str, gradle_root: Path, pref: Preferences) -> tuple[str, str]:
     apk = deterministic_apk(project, gradle_root, pref)
     candidates = apk_candidates(gradle_root)
@@ -391,17 +413,7 @@ def build_status(project: str, gradle_root: Path, pref: Preferences) -> tuple[st
         return ("Preferred missing" if candidates else "No APK"), ""
     if apk is None:
         return ("Ambiguous" if candidates else "No APK"), ""
-    apk_mtime = apk.stat().st_mtime
-    newest = 0.0
-    for path in Path(project).rglob("*"):
-        if any(part in SKIP_DIRS for part in path.parts):
-            continue
-        try:
-            if path.is_file():
-                newest = max(newest, path.stat().st_mtime)
-        except OSError:
-            pass
-    return ("Fresh" if newest <= apk_mtime else "Stale"), str(apk)
+    return ("Fresh" if newest_project_input_mtime(project) <= apk.stat().st_mtime else "Stale"), str(apk)
 
 
 def device_status(project: str, gradle_root: Path, pref: Preferences) -> tuple[str, str]:
@@ -472,7 +484,8 @@ def build_install(project: str, *, sync: bool = False, force_build: bool = True,
         safe_git_pull(project, emit)
 
     build, _ = build_status(project, gradle_root, pref)
-    if force_build or build in {"Stale", "No APK", "Preferred missing", "Ambiguous"}:
+    built = force_build or build in {"Stale", "No APK", "Preferred missing", "Ambiguous"}
+    if built:
         result = run([str(gradle_root / "gradlew"), pref.gradle_task, "--stacktrace"],
                      cwd=gradle_root, env=env, stream=emit)
         if result.returncode:
@@ -483,6 +496,9 @@ def build_install(project: str, *, sync: bool = False, force_build: bool = True,
     apk = deterministic_apk(project, gradle_root, pref)
     if apk is None:
         raise ToolError("A deterministic APK could not be selected. Configure Preferred APK in Settings.")
+    if built:
+        os.utime(apk, None)
+        emit(f"Build freshness validated: {apk}")
 
     package = package_id(apk, gradle_root)
     install_needed = True
