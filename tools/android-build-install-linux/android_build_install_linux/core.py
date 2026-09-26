@@ -278,7 +278,7 @@ def java_env(pref: Preferences) -> dict[str, str]:
     return {}
 
 
-def apk_candidates(gradle_root: Path, max_depth: int = 2) -> list[Path]:
+def all_apk_candidates(gradle_root: Path, max_depth: int = 2) -> list[Path]:
     queue: list[tuple[Path, int]] = [(gradle_root, 0)]
     found: set[Path] = set()
     while queue:
@@ -293,22 +293,28 @@ def apk_candidates(gradle_root: Path, max_depth: int = 2) -> list[Path]:
         except OSError:
             continue
         queue.extend((p, depth + 1) for p in children)
-    debug = [p for p in found if "debug" in p.parts or "debug" in p.name.lower()]
-    values = debug or list(found)
-    return sorted(values, key=lambda p: p.stat().st_mtime, reverse=True)
+    return sorted(found, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def apk_candidates(gradle_root: Path, max_depth: int = 2) -> list[Path]:
+    candidates = all_apk_candidates(gradle_root, max_depth=max_depth)
+    debug = [p for p in candidates if "debug" in p.parts or "debug" in p.name.lower()]
+    return debug or candidates
 
 
 def deterministic_apk(project: str, gradle_root: Path, pref: Preferences) -> Path | None:
-    candidates = apk_candidates(gradle_root)
-    if not candidates:
+    all_candidates = all_apk_candidates(gradle_root)
+    if not all_candidates:
         return None
     if pref.preferred_apk:
         preferred = Path(pref.preferred_apk).expanduser()
         if not preferred.is_absolute():
             preferred = Path(project).resolve() / preferred
         preferred = preferred.resolve()
-        matches = [p for p in candidates if p.resolve() == preferred]
+        matches = [p for p in all_candidates if p.resolve() == preferred]
         return matches[0] if len(matches) == 1 else None
+
+    candidates = apk_candidates(gradle_root)
     if len(candidates) == 1:
         return candidates[0]
     conventional = [p for p in candidates if p.as_posix().endswith("/app/build/outputs/apk/debug/app-debug.apk")]
@@ -357,7 +363,10 @@ def git_status(project: str, fetch: bool = False) -> tuple[str, str]:
         return "Not Git", ""
     root = probe.stdout.strip()
     if fetch:
-        run(["git", "-C", root, "fetch", "--quiet"])
+        fetched = run(["git", "-C", root, "fetch", "--quiet"])
+        if fetched.returncode:
+            detail = ((fetched.stdout or "") + (fetched.stderr or "")).strip()
+            raise ToolError(f"git fetch failed for {root}" + (f":\n{detail}" if detail else "."))
     dirty = run(["git", "-C", root, "status", "--porcelain"])
     if dirty.stdout.strip():
         return "Dirty", dirty.stdout.strip()
