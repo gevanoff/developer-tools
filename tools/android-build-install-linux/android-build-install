@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+VENV="${XDG_DATA_HOME:-$HOME/.local/share}/android-build-install/venv"
+
+if [[ ! -x "$VENV/bin/python" ]]; then
+  python3 -m venv "$VENV"
+  "$VENV/bin/python" -m pip install --upgrade pip
+  "$VENV/bin/pip" install -e "$ROOT"
+fi
+
+exec "$VENV/bin/python" -m android_build_install_linux.app "$@"

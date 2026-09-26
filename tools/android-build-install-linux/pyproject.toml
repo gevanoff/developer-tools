@@ -1,0 +1,16 @@
+[project]
+name = "android-build-install-linux"
+version = "0.1.0"
+description = "Ubuntu/Linux Android build, sync, install, and launch dashboard."
+requires-python = ">=3.10"
+dependencies = ["PySide6>=6.7"]
+
+[project.scripts]
+android-build-install = "android_build_install_linux.app:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["android_build_install_linux"]
