@@ -4,7 +4,8 @@ import sys
 import traceback
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, QUrl, Signal, Slot
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
@@ -100,6 +101,7 @@ class MainWindow(QMainWindow):
         self.resize(1120, 720)
         self.pool = QThreadPool.globalInstance()
         self.busy = False
+        self.controller = core.ProcessController()
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -121,6 +123,8 @@ class MainWindow(QMainWindow):
             ("Build & Install", self.build_install),
             ("Git Pull", self.git_pull),
             ("Refresh Status", self.refresh),
+            ("Scan Device…", self.scan_device),
+            ("Reports…", self.reports),
             ("Settings…", self.settings),
             ("Add…", self.add_project),
             ("Remove", self.remove_project),
@@ -128,6 +132,10 @@ class MainWindow(QMainWindow):
             button = QPushButton(label)
             button.clicked.connect(callback)
             row.addWidget(button)
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setEnabled(False)
+        self.cancel_button.clicked.connect(self.cancel_operation)
+        row.addWidget(self.cancel_button)
         outer.addLayout(row)
 
         outer.addWidget(QLabel("Operation output"))
@@ -165,11 +173,13 @@ class MainWindow(QMainWindow):
     def append(self, line: str):
         self.output.appendPlainText(line)
 
-    def start(self, label: str, fn, done=None):
+    def start(self, label: str, fn, done=None, cancellable: bool = False):
         if self.busy:
             QMessageBox.information(self, "Busy", "An operation is already running.")
             return
         self.busy = True
+        self.controller.reset()
+        self.cancel_button.setEnabled(cancellable)
         self.status.setText(label)
         worker = Worker(fn)
         worker.signals.line.connect(self.append)
@@ -177,6 +187,7 @@ class MainWindow(QMainWindow):
 
         def finished(value):
             self.busy = False
+            self.cancel_button.setEnabled(False)
             self.status.setText("Ready")
             if done:
                 done(value)
@@ -186,9 +197,22 @@ class MainWindow(QMainWindow):
 
     def failed(self, message: str):
         self.busy = False
+        self.cancel_button.setEnabled(False)
+        first = message.split("\n\n", 1)[0]
+        if first.strip() == "Operation cancelled.":
+            self.status.setText("Cancelled")
+            self.append("Operation cancelled.")
+            return
         self.status.setText("Failed")
         self.append(message)
-        QMessageBox.critical(self, "Operation failed", message.split("\n\n", 1)[0])
+        QMessageBox.critical(self, "Operation failed", first)
+
+    def cancel_operation(self):
+        if not self.busy:
+            return
+        self.status.setText("Cancelling…")
+        self.cancel_button.setEnabled(False)
+        self.controller.cancel()
 
     def require_project(self) -> str | None:
         project = self.selected_project()
@@ -226,8 +250,9 @@ class MainWindow(QMainWindow):
             return
         self.output.clear()
         self.start("Sync & Run…",
-                   lambda emit: core.build_install(project, sync=True, force_build=False, stream=emit),
-                   lambda _: self.refresh())
+                   lambda emit: core.build_install(project, sync=True, force_build=False,
+                                                   stream=emit, controller=self.controller),
+                   lambda _: self.refresh(), cancellable=True)
 
     def build_install(self):
         project = self.require_project()
@@ -235,8 +260,9 @@ class MainWindow(QMainWindow):
             return
         self.output.clear()
         self.start("Build & Install…",
-                   lambda emit: core.build_install(project, sync=False, force_build=True, stream=emit),
-                   lambda _: self.refresh())
+                   lambda emit: core.build_install(project, sync=False, force_build=True,
+                                                   stream=emit, controller=self.controller),
+                   lambda _: self.refresh(), cancellable=True)
 
     def git_pull(self):
         project = self.require_project()
@@ -244,8 +270,49 @@ class MainWindow(QMainWindow):
             return
         self.output.clear()
         self.start("Git Pull…",
-                   lambda emit: core.safe_git_pull(project, emit),
-                   lambda _: self.refresh())
+                   lambda emit: core.safe_git_pull(project, emit, self.controller),
+                   lambda _: self.refresh(), cancellable=True)
+
+    def scan_device(self):
+        projects = core.load_projects()
+        if not projects:
+            QMessageBox.information(self, "No projects", "Add an Android project first.")
+            return
+
+        def task(emit):
+            lines = []
+            for project in projects:
+                emit(f"Scanning device state: {project}")
+                status = core.project_status(project, fetch=False)
+                lines.append(
+                    f"{Path(project).name}\n"
+                    f"  Device: {status.device}\n"
+                    f"  Local build: {status.build}\n"
+                    f"  {status.detail or ''}"
+                )
+            return "\n\n".join(lines)
+
+        def done(text):
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Android Device Scan")
+            dialog.resize(760, 520)
+            layout = QVBoxLayout(dialog)
+            output = QPlainTextEdit()
+            output.setReadOnly(True)
+            output.setPlainText(text)
+            layout.addWidget(output)
+            buttons = QDialogButtonBox(QDialogButtonBox.Close)
+            buttons.rejected.connect(dialog.reject)
+            buttons.clicked.connect(dialog.accept)
+            layout.addWidget(buttons)
+            dialog.exec()
+
+        self.start("Scanning device…", task, done)
+
+    def reports(self):
+        log_dir = core.state_root() / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_dir)))
 
     def settings(self):
         project = self.require_project()
