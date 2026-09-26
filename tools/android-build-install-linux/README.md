@@ -38,6 +38,12 @@ From this directory:
 
     ./android-build-install
 
+To open a specific project and immediately run Build & Install:
+
+    ./android-build-install /path/to/project
+
+The project path is remembered for future dashboard sessions. This is the Linux analogue of launching the Windows tool with a dragged/explicit project folder.
+
 The launcher creates a dedicated virtual environment under:
 
     ~/.local/share/android-build-install/venv
