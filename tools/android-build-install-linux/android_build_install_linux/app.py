@@ -4,7 +4,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, QUrl, Signal, Slot
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
@@ -95,8 +95,9 @@ class SettingsDialog(QDialog):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, initial_project: str | None = None):
         super().__init__()
+        self.initial_project = initial_project
         self.setWindowTitle("Android Build and Install — Linux")
         self.resize(1120, 720)
         self.pool = QThreadPool.globalInstance()
@@ -147,7 +148,10 @@ class MainWindow(QMainWindow):
         self.status = QLabel("")
         outer.addWidget(self.status)
 
+        if self.initial_project:
+            core.remember_project(self.initial_project)
         self.reload_rows()
+        self.select_project(self.initial_project)
         self.refresh()
 
     def selected_project(self) -> str | None:
@@ -156,6 +160,16 @@ class MainWindow(QMainWindow):
             return None
         item = self.table.item(row, 0)
         return item.data(1001) if item else None
+
+    def select_project(self, project: str | None):
+        if not project:
+            return
+        normalized = str(Path(project).expanduser().resolve())
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item and item.data(1001) == normalized:
+                self.table.selectRow(row)
+                return
 
     def reload_rows(self):
         projects = core.load_projects()
@@ -338,9 +352,18 @@ class MainWindow(QMainWindow):
 
 
 def main() -> int:
+    initial_project = None
+    for arg in sys.argv[1:]:
+        candidate = Path(arg).expanduser()
+        if candidate.is_dir():
+            initial_project = str(candidate.resolve())
+            break
+
     app = QApplication(sys.argv)
-    win = MainWindow()
+    win = MainWindow(initial_project=initial_project)
     win.show()
+    if initial_project:
+        QTimer.singleShot(0, win.build_install)
     return app.exec()
 
 
