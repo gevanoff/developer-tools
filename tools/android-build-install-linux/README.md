@@ -15,7 +15,9 @@ It preserves the same operating model:
 - adb install -r without automatic uninstall;
 - optional app auto-launch;
 - timestamped logs;
-- live operation output in a desktop dashboard.
+- live operation output in a desktop dashboard;
+- cancellation of active Gradle/Git/ADB subprocess groups;
+- read-only device scan and report browsing.
 
 ## Ubuntu requirements
 
@@ -84,6 +86,16 @@ The optimized path:
 9. launch when enabled.
 
 Multiple Gradle roots, multiple devices without a preference, or ambiguous APK outputs are treated as errors rather than guessed.
+
+## Cancellation
+
+Sync & Run, Build & Install, and Git Pull expose a Cancel action while a cancellable subprocess is active. The Linux implementation starts streamed commands in their own process group and sends SIGTERM to that group, so Gradle/ADB descendants are cancelled with the parent operation instead of being orphaned.
+
+## Device scan and reports
+
+Scan Device performs a read-only status pass over saved projects and reports the current local-build/device relationship without rebuilding or installing.
+
+Reports opens the XDG state log directory containing timestamped operation logs.
 
 ## Tests
 
