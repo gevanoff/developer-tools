@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -14,7 +15,7 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 APP_NAME = "android-build-install"
-SKIP_DIRS = {".git", ".gradle", ".idea", "build", "node_modules", "out", ".venv", "venv"}
+SKIP_DIRS = {".git", ".gradle", ".godot", ".idea", "build", "node_modules", "out", ".venv", "venv"}
 
 
 class ToolError(RuntimeError):
@@ -81,6 +82,8 @@ class Preferences:
     java_home: str = ""
     device_serial: str = ""
     auto_launch: bool = True
+    godot_executable: str = ""
+    godot_preset: str = ""
 
 
 @dataclass
@@ -158,6 +161,8 @@ def load_preferences(project: str) -> Preferences:
         java_home=data.get("java_home", "") or "",
         device_serial=data.get("device_serial", "") or "",
         auto_launch=bool(data.get("auto_launch", True)),
+        godot_executable=data.get("godot_executable", "") or "",
+        godot_preset=data.get("godot_preset", "") or "",
     )
 
 
@@ -190,6 +195,8 @@ def run(argv: list[str], *, cwd: Path | None = None, env: dict[str, str] | None 
                 stream(line.rstrip("\n"))
             rc = proc.wait()
         finally:
+            if proc.stdout:
+                proc.stdout.close()
             if controller:
                 controller.detach(proc)
         if controller and controller.cancelled:
@@ -233,6 +240,80 @@ def select_gradle_root(project: str) -> Path:
     if not os.access(wrapper, os.X_OK):
         raise ToolError(f"Gradle wrapper is not executable: {wrapper}\nRun: chmod +x {shlex.quote(str(wrapper))}")
     return roots[0]
+
+
+def select_project_root(project: str) -> Path:
+    root = Path(project).expanduser().resolve()
+    # Godot may contain a generated Android Gradle wrapper. Export via Godot.
+    if (root / "project.godot").is_file():
+        return root
+    return select_gradle_root(project)
+
+
+def godot_export_preset(root: Path, pref: Preferences) -> str:
+    path = root / "export_presets.cfg"
+    if not path.is_file():
+        raise ToolError("Godot Android export is not configured. Open Project > Export in Godot, "
+                        "add an Android preset, and save export_presets.cfg.")
+    presets = []
+    current = {"ignore": True}
+    # Read only top-level preset string fields; Godot option values use Variant
+    # syntax (including multiline arrays), not Python's INI format.
+    for line in path.read_text(encoding="utf-8").splitlines() + ["[end]"]:
+        line = line.strip()
+        if line.startswith("["):
+            if current.get("platform") == "Android" and current.get("name"):
+                presets.append(current["name"])
+            current = {} if re.fullmatch(r"\[preset\.\d+\]", line) else {"ignore": True}
+        elif not current.get("ignore") and "=" in line:
+            key, value = line.split("=", 1)
+            if key.strip() in {"name", "platform"}:
+                try:
+                    decoded = json.loads(value)
+                    if not isinstance(decoded, str):
+                        raise ValueError("Expected a string")
+                    current[key.strip()] = decoded
+                except ValueError as exc:
+                    raise ToolError(f"Invalid Godot export preset field: {key}") from exc
+    if pref.godot_preset:
+        if presets.count(pref.godot_preset) == 1:
+            return pref.godot_preset
+        raise ToolError("Configured Godot preset is missing, duplicated, or is not Android.")
+    if len(presets) != 1:
+        raise ToolError("Create one Android export preset in Godot, or choose its exact name "
+                        "in ABI Settings when there are several.")
+    return presets[0]
+
+
+def godot_command(pref: Preferences) -> str:
+    executable = (shutil.which(str(Path(pref.godot_executable).expanduser()))
+                  if pref.godot_executable else shutil.which("godot") or shutil.which("godot4"))
+    if not executable:
+        raise ToolError("Godot was not found. Install Godot 4 and matching export templates, "
+                        "then set Godot executable in Settings or put godot on PATH.")
+    return executable
+
+
+def godot_apk(root: Path) -> Path:
+    return root / "build" / "abi" / "godot-debug.apk"
+
+
+def export_godot(root: Path, pref: Preferences, env: dict[str, str], emit,
+                 controller: ProcessController | None = None) -> None:
+    preset = godot_export_preset(root, pref)
+    executable = godot_command(pref)
+    output = godot_apk(root)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    # An unsuccessful export must not replace the previous usable APK.
+    with tempfile.TemporaryDirectory(prefix="export-", dir=output.parent) as td:
+        candidate = Path(td) / "debug.apk"
+        run([executable, "--headless", "--path", str(root), "--export-debug", preset, str(candidate)],
+            cwd=root, env=env, stream=emit, controller=controller, check=True)
+        if not candidate.is_file() or candidate.stat().st_size == 0:
+            raise ToolError("Godot did not produce an APK. Check export templates, Android SDK, "
+                            "JDK, and debug signing settings in Godot.")
+        candidate.replace(output)
+        save_json(output.with_suffix(".json"), {"preset": preset})
 
 
 def local_sdk_dir(gradle_root: Path) -> Path | None:
@@ -362,6 +443,9 @@ def apk_candidates(gradle_root: Path, max_depth: int = 2) -> list[Path]:
 
 
 def deterministic_apk(project: str, gradle_root: Path, pref: Preferences) -> Path | None:
+    if (gradle_root / "project.godot").is_file():
+        apk = godot_apk(gradle_root)
+        return apk if apk.is_file() else None
     all_candidates = all_apk_candidates(gradle_root)
     if not all_candidates:
         return None
@@ -477,6 +561,13 @@ def newest_project_input_mtime(project: str) -> float:
 
 def build_status(project: str, gradle_root: Path, pref: Preferences) -> tuple[str, str]:
     apk = deterministic_apk(project, gradle_root, pref)
+    if (gradle_root / "project.godot").is_file():
+        preset = godot_export_preset(gradle_root, pref)
+        if apk is None:
+            return "No APK", ""
+        if load_json(apk.with_suffix(".json"), {}).get("preset") != preset:
+            return "Stale", str(apk)
+        return ("Fresh" if newest_project_input_mtime(project) <= apk.stat().st_mtime else "Stale"), str(apk)
     candidates = apk_candidates(gradle_root)
     if pref.preferred_apk and apk is None:
         return ("Preferred missing" if candidates else "No APK"), ""
@@ -506,13 +597,12 @@ def device_status(project: str, gradle_root: Path, pref: Preferences) -> tuple[s
 
 def project_status(project: str, fetch: bool = False) -> ProjectStatus:
     pref = load_preferences(project)
-    roots = find_gradle_roots(project)
     git, git_detail = git_status(project, fetch=fetch)
-    if len(roots) != 1:
-        return ProjectStatus(git, "Ambiguous" if roots else "No Gradle", "Unknown",
-                             git_detail or ("Select the specific Gradle project folder." if roots else "No gradlew found."))
-    gradle_root = roots[0]
-    build, build_detail = build_status(project, gradle_root, pref)
+    try:
+        gradle_root = select_project_root(project)
+        build, build_detail = build_status(project, gradle_root, pref)
+    except ToolError as exc:
+        return ProjectStatus(git, "Setup required", "Unknown", str(exc))
     device, device_detail = device_status(project, gradle_root, pref)
     return ProjectStatus(git, build, device, "\n".join(x for x in (git_detail, build_detail, device_detail) if x))
 
@@ -529,7 +619,11 @@ def build_install(project: str, *, sync: bool = False, force_build: bool = True,
                   controller: ProcessController | None = None) -> str:
     project = str(Path(project).expanduser().resolve())
     pref = load_preferences(project)
-    gradle_root = select_gradle_root(project)
+    gradle_root = select_project_root(project)
+    is_godot = (gradle_root / "project.godot").is_file()
+    if is_godot:
+        godot_export_preset(gradle_root, pref)
+        godot_command(pref)
     adb = resolve_adb(gradle_root)
     device = resolve_device(adb, pref.device_serial)
     env = java_env(pref)
@@ -543,7 +637,7 @@ def build_install(project: str, *, sync: bool = False, force_build: bool = True,
             stream(line)
 
     emit(f"Project: {project}")
-    emit(f"Gradle root: {gradle_root}")
+    emit(f"{'Godot' if is_godot else 'Gradle'} root: {gradle_root}")
     emit(f"Device: {device.model} [{device.serial}]")
 
     if sync:
@@ -555,7 +649,9 @@ def build_install(project: str, *, sync: bool = False, force_build: bool = True,
 
     build, _ = build_status(project, gradle_root, pref)
     built = force_build or build in {"Stale", "No APK", "Preferred missing", "Ambiguous"}
-    if built:
+    if built and is_godot:
+        export_godot(gradle_root, pref, env, emit, controller)
+    elif built:
         result = run([str(gradle_root / "gradlew"), pref.gradle_task, "--stacktrace"],
                      cwd=gradle_root, env=env, stream=emit, controller=controller)
         if result.returncode:

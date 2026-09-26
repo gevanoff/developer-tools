@@ -43,6 +43,9 @@ class SettingsDialog(QDialog):
         pref = core.load_preferences(project)
 
         self.gradle = QLineEdit(pref.gradle_task)
+        self.godot = QLineEdit(pref.godot_executable)
+        self.godot_preset = QLineEdit(pref.godot_preset)
+        self.godot_preset.setPlaceholderText("Automatic when there is one Android preset")
         self.apk = QLineEdit(pref.preferred_apk)
         self.java = QLineEdit(pref.java_home)
         self.device = QLineEdit(pref.device_serial)
@@ -51,6 +54,13 @@ class SettingsDialog(QDialog):
 
         form = QFormLayout()
         form.addRow("Gradle task", self.gradle)
+        form.addRow("Godot executable", self.godot)
+        form.addRow("Godot Android preset", self.godot_preset)
+        is_godot = (Path(project) / "project.godot").is_file()
+        self.gradle.setEnabled(not is_godot)
+        self.apk.setEnabled(not is_godot)
+        self.godot.setEnabled(is_godot)
+        self.godot_preset.setEnabled(is_godot)
         form.addRow("Preferred APK", self.apk)
         form.addRow("JAVA_HOME", self.java)
         form.addRow("Preferred device serial", self.device)
@@ -70,7 +80,7 @@ class SettingsDialog(QDialog):
 
     def detect(self):
         try:
-            root = core.select_gradle_root(self.project)
+            root = core.select_project_root(self.project)
             adb = core.resolve_adb(root)
             devices = [d for d in core.connected_devices(adb) if d.state == "device"]
             if len(devices) == 1:
@@ -90,6 +100,8 @@ class SettingsDialog(QDialog):
             java_home=self.java.text().strip(),
             device_serial=self.device.text().strip(),
             auto_launch=self.launch.isChecked(),
+            godot_executable=self.godot.text().strip(),
+            godot_preset=self.godot_preset.text().strip(),
         ))
         self.accept()
 
@@ -102,6 +114,8 @@ class MainWindow(QMainWindow):
         self.resize(1120, 720)
         self.pool = QThreadPool.globalInstance()
         self.busy = False
+        self._worker = None
+        self._done = None
         self.controller = core.ProcessController()
 
         root = QWidget()
@@ -139,7 +153,14 @@ class MainWindow(QMainWindow):
         row.addWidget(self.cancel_button)
         outer.addLayout(row)
 
-        outer.addWidget(QLabel("Operation output"))
+        output_header = QHBoxLayout()
+        output_header.addWidget(QLabel("Operation output"))
+        output_header.addStretch()
+        copy_output = QPushButton("Copy output")
+        copy_output.setToolTip("Copy all text currently in the operation output to the clipboard")
+        copy_output.clicked.connect(self.copy_output)
+        output_header.addWidget(copy_output)
+        outer.addLayout(output_header)
         self.output = QPlainTextEdit()
         self.output.setReadOnly(True)
         self.output.document().setMaximumBlockCount(4000)
@@ -187,6 +208,9 @@ class MainWindow(QMainWindow):
     def append(self, line: str):
         self.output.appendPlainText(line)
 
+    def copy_output(self):
+        QApplication.clipboard().setText(self.output.toPlainText())
+
     def start(self, label: str, fn, done=None, cancellable: bool = False):
         if self.busy:
             QMessageBox.information(self, "Busy", "An operation is already running.")
@@ -196,20 +220,29 @@ class MainWindow(QMainWindow):
         self.cancel_button.setEnabled(cancellable)
         self.status.setText(label)
         worker = Worker(fn)
+        # Keep the signal owner alive until its queued result reaches the UI.
+        self._worker = worker
+        self._done = done
         worker.signals.line.connect(self.append)
         worker.signals.failed.connect(self.failed)
-
-        def finished(value):
-            self.busy = False
-            self.cancel_button.setEnabled(False)
-            self.status.setText("Ready")
-            if done:
-                done(value)
-
-        worker.signals.done.connect(finished)
+        worker.signals.done.connect(self.finished)
         self.pool.start(worker)
 
+    @Slot(object)
+    def finished(self, value):
+        done = self._done
+        self._worker = None
+        self._done = None
+        self.busy = False
+        self.cancel_button.setEnabled(False)
+        self.status.setText("Ready")
+        if done:
+            done(value)
+
+    @Slot(str)
     def failed(self, message: str):
+        self._worker = None
+        self._done = None
         self.busy = False
         self.cancel_button.setEnabled(False)
         first = message.split("\n\n", 1)[0]
