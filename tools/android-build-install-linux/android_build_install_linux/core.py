@@ -5,8 +5,10 @@ import json
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import tempfile
+import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable, Iterable
@@ -17,6 +19,52 @@ SKIP_DIRS = {".git", ".gradle", ".idea", "build", "node_modules", "out", ".venv"
 
 class ToolError(RuntimeError):
     pass
+
+
+class OperationCancelled(ToolError):
+    pass
+
+
+class ProcessController:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._process: subprocess.Popen[str] | None = None
+        self._cancelled = False
+
+    def reset(self) -> None:
+        with self._lock:
+            self._cancelled = False
+            self._process = None
+
+    def attach(self, process: subprocess.Popen[str]) -> None:
+        with self._lock:
+            if self._cancelled:
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                raise OperationCancelled("Operation cancelled.")
+            self._process = process
+
+    def detach(self, process: subprocess.Popen[str]) -> None:
+        with self._lock:
+            if self._process is process:
+                self._process = None
+
+    def cancel(self) -> None:
+        with self._lock:
+            self._cancelled = True
+            process = self._process
+        if process is not None and process.poll() is None:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+
+    @property
+    def cancelled(self) -> bool:
+        with self._lock:
+            return self._cancelled
 
 
 @dataclass
@@ -121,20 +169,31 @@ def save_preferences(project: str, pref: Preferences) -> None:
 
 
 def run(argv: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None,
-        check: bool = False, stream: Callable[[str], None] | None = None) -> subprocess.CompletedProcess[str]:
+        check: bool = False, stream: Callable[[str], None] | None = None,
+        controller: ProcessController | None = None) -> subprocess.CompletedProcess[str]:
     merged_env = os.environ.copy()
     if env:
         merged_env.update(env)
     if stream:
+        if controller and controller.cancelled:
+            raise OperationCancelled("Operation cancelled.")
         stream("$ " + shlex.join(argv))
         proc = subprocess.Popen(argv, cwd=cwd, env=merged_env, text=True, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, start_new_session=True)
+        if controller:
+            controller.attach(proc)
         output: list[str] = []
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            output.append(line)
-            stream(line.rstrip("\n"))
-        rc = proc.wait()
+        try:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                output.append(line)
+                stream(line.rstrip("\n"))
+            rc = proc.wait()
+        finally:
+            if controller:
+                controller.detach(proc)
+        if controller and controller.cancelled:
+            raise OperationCancelled("Operation cancelled.")
         result = subprocess.CompletedProcess(argv, rc, "".join(output), "")
     else:
         result = subprocess.run(argv, cwd=cwd, env=merged_env, text=True, capture_output=True)
@@ -384,13 +443,14 @@ def git_status(project: str, fetch: bool = False) -> tuple[str, str]:
     return "Current", ""
 
 
-def safe_git_pull(project: str, stream: Callable[[str], None] | None = None) -> None:
+def safe_git_pull(project: str, stream: Callable[[str], None] | None = None,
+                  controller: ProcessController | None = None) -> None:
     status, _ = git_status(project, fetch=True)
     if status == "Dirty" or status.startswith("Diverged") or status == "No upstream":
         raise ToolError(f"Refusing Git pull because repository state is {status}.")
     if not status.startswith("Behind"):
         return
-    run(["git", "-C", project, "pull", "--ff-only"], check=True, stream=stream)
+    run(["git", "-C", project, "pull", "--ff-only"], check=True, stream=stream, controller=controller)
 
 
 def newest_project_input_mtime(project: str) -> float:
@@ -465,7 +525,8 @@ def log_file(project: str) -> Path:
 
 
 def build_install(project: str, *, sync: bool = False, force_build: bool = True,
-                  stream: Callable[[str], None] | None = None) -> str:
+                  stream: Callable[[str], None] | None = None,
+                  controller: ProcessController | None = None) -> str:
     project = str(Path(project).expanduser().resolve())
     pref = load_preferences(project)
     gradle_root = select_gradle_root(project)
@@ -490,13 +551,13 @@ def build_install(project: str, *, sync: bool = False, force_build: bool = True,
         emit(f"Git: {git}")
         if git == "Dirty" or git.startswith("Diverged") or git == "No upstream":
             raise ToolError(f"Sync & Run stopped: Git state is {git}.")
-        safe_git_pull(project, emit)
+        safe_git_pull(project, emit, controller)
 
     build, _ = build_status(project, gradle_root, pref)
     built = force_build or build in {"Stale", "No APK", "Preferred missing", "Ambiguous"}
     if built:
         result = run([str(gradle_root / "gradlew"), pref.gradle_task, "--stacktrace"],
-                     cwd=gradle_root, env=env, stream=emit)
+                     cwd=gradle_root, env=env, stream=emit, controller=controller)
         if result.returncode:
             raise ToolError(f"Gradle failed with exit code {result.returncode}. See {log}")
     else:
@@ -517,7 +578,8 @@ def build_install(project: str, *, sync: bool = False, force_build: bool = True,
             emit("Install skipped: device has the same APK.")
 
     if install_needed:
-        result = run([adb, "-s", device.serial, "install", "-r", str(apk)], stream=emit)
+        result = run([adb, "-s", device.serial, "install", "-r", str(apk)],
+                     stream=emit, controller=controller)
         if result.returncode:
             if "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in result.stdout:
                 raise ToolError("Signing key mismatch. Automatic uninstall is disabled because it would remove app data.")
@@ -526,7 +588,8 @@ def build_install(project: str, *, sync: bool = False, force_build: bool = True,
     if pref.auto_launch:
         if package:
             result = run([adb, "-s", device.serial, "shell", "monkey", "-p", package,
-                          "-c", "android.intent.category.LAUNCHER", "1"], stream=emit)
+                          "-c", "android.intent.category.LAUNCHER", "1"],
+                         stream=emit, controller=controller)
             if result.returncode or "No activities found" in result.stdout:
                 emit(f"WARNING: launch failed for {package}.")
         else:
