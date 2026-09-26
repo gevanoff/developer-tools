@@ -60,6 +60,20 @@ class CoreTests(unittest.TestCase):
             with self.assertRaises(core.ToolError):
                 core.git_status(str(root), fetch=True)
 
+    def test_process_controller_terminates_process_group(self):
+        subprocess = __import__("subprocess")
+        proc = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        controller = core.ProcessController()
+        try:
+            controller.attach(proc)
+            controller.cancel()
+            proc.wait(timeout=5)
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertTrue(controller.cancelled)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+
     def test_xdg_paths(self):
         with tempfile.TemporaryDirectory() as td:
             with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": td, "XDG_STATE_HOME": td}, clear=False):
