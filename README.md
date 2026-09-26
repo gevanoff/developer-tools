@@ -1,23 +1,25 @@
-# Windows Tools
+# Developer Tools
 
-Small, inspectable utilities for recurring Windows workflows.
+Small, inspectable utilities for recurring development and workstation workflows.
 
-The repository is organized as a collection rather than around a single application. Each utility should live in its own directory under `tools/` and include enough documentation to run it without repository-specific setup.
+The repository is organized as a collection rather than around a single application. Each utility lives in its own directory under `tools/` and documents the platform(s) it supports.
 
 ## Tools
 
-| Tool | Purpose |
-| --- | --- |
-| `android-build-install` | Build an Android project with its Gradle wrapper and install the resulting debug APK on a connected Android device. |
-| `google-drive-zip-merger` | Merge the multiple ZIP archives produced by large Google Drive folder downloads into one destination tree. |
+| Tool | Platform | Purpose |
+| --- | --- | --- |
+| `android-build-install` | Windows | Build, synchronize, install, compare, and launch Android development APKs from a Windows dashboard. |
+| `android-build-install-linux` | Linux / Ubuntu | Linux counterpart to the Android build/install dashboard, using XDG paths and native Linux tooling conventions. |
+| `google-drive-zip-merger` | Windows | Merge the multiple ZIP archives produced by large Google Drive folder downloads into one destination tree. |
 
 ## Repository conventions
 
-- Target Windows 11 unless a tool documents broader support.
-- Prefer built-in Windows capabilities and PowerShell over additional dependencies when practical.
-- Keep launchers simple enough for non-technical use where appropriate.
-- Put reusable logic in PowerShell rather than batch files; use `.bat` files primarily as convenient Windows entry points.
-- Avoid destructive behavior by default. Cleanup operations should be explicit or confirmed after successful work.
-- Keep each utility self-contained under `tools/<tool-name>/`.
+- Each utility explicitly documents its supported platform(s).
+- Keep utilities self-contained under `tools/<tool-name>/`.
+- Preserve user data by default and make destructive operations explicit.
+- Prefer thin launchers with substantive logic in inspectable implementation code.
+- Avoid administrator/root requirements unless they are intrinsic to the task.
+- For equivalent tools on multiple platforms, keep safety and workflow semantics aligned even when implementation details differ.
+- Use platform-native integration where appropriate: PowerShell/.NET on Windows; XDG conventions and normal Unix process/path semantics on Linux.
 
 See each tool's README for usage details.
