@@ -74,6 +74,36 @@ class CoreTests(unittest.TestCase):
             if proc.poll() is None:
                 proc.kill()
 
+    def test_freshness_scan_skips_directory_symlink_cycles(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "src").mkdir()
+            source = root / "src" / "main.txt"
+            source.write_text("x", encoding="utf-8")
+            (root / "src" / "loop").symlink_to(root, target_is_directory=True)
+            self.assertGreaterEqual(core.newest_project_input_mtime(str(root)), source.stat().st_mtime)
+
+    def test_git_fetch_receives_cancellation_controller(self):
+        controller = core.ProcessController()
+        responses = [
+            __import__("subprocess").CompletedProcess([], 0, "/tmp/repo\n", ""),
+            __import__("subprocess").CompletedProcess([], 0, "", ""),
+            __import__("subprocess").CompletedProcess([], 0, "", ""),
+            __import__("subprocess").CompletedProcess([], 0, "origin/main\n", ""),
+            __import__("subprocess").CompletedProcess([], 0, "0 0\n", ""),
+        ]
+        seen = []
+
+        def fake_run(argv, **kwargs):
+            seen.append((argv, kwargs))
+            return responses.pop(0)
+
+        with mock.patch.object(core, "run", side_effect=fake_run):
+            self.assertEqual(core.git_status("/tmp/repo", fetch=True, controller=controller)[0], "Current")
+        fetch_calls = [item for item in seen if "fetch" in item[0]]
+        self.assertEqual(len(fetch_calls), 1)
+        self.assertIs(fetch_calls[0][1].get("controller"), controller)
+
     def test_xdg_paths(self):
         with tempfile.TemporaryDirectory() as td:
             with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": td, "XDG_STATE_HOME": td}, clear=False):
