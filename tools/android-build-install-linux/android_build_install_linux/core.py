@@ -174,10 +174,11 @@ def run(argv: list[str], *, cwd: Path | None = None, env: dict[str, str] | None 
     merged_env = os.environ.copy()
     if env:
         merged_env.update(env)
-    if stream:
+    if stream or controller:
         if controller and controller.cancelled:
             raise OperationCancelled("Operation cancelled.")
-        stream("$ " + shlex.join(argv))
+        if stream:
+            stream("$ " + shlex.join(argv))
         proc = subprocess.Popen(argv, cwd=cwd, env=merged_env, text=True, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, start_new_session=True)
         if controller:
@@ -187,7 +188,8 @@ def run(argv: list[str], *, cwd: Path | None = None, env: dict[str, str] | None 
             assert proc.stdout is not None
             for line in proc.stdout:
                 output.append(line)
-                stream(line.rstrip("\n"))
+                if stream:
+                    stream(line.rstrip("\n"))
             rc = proc.wait()
         finally:
             if controller:
@@ -416,13 +418,16 @@ def installed_apk_hash(adb: str, device: Device, package: str) -> str | None:
         return sha256(local) if pulled.returncode == 0 and local.is_file() else None
 
 
-def git_status(project: str, fetch: bool = False) -> tuple[str, str]:
+def git_status(project: str, fetch: bool = False,
+               controller: ProcessController | None = None,
+               stream: Callable[[str], None] | None = None) -> tuple[str, str]:
     probe = run(["git", "-C", project, "rev-parse", "--show-toplevel"])
     if probe.returncode:
         return "Not Git", ""
     root = probe.stdout.strip()
     if fetch:
-        fetched = run(["git", "-C", root, "fetch", "--quiet"])
+        fetched = run(["git", "-C", root, "fetch", "--quiet"],
+                      controller=controller, stream=stream)
         if fetched.returncode:
             detail = ((fetched.stdout or "") + (fetched.stderr or "")).strip()
             raise ToolError(f"git fetch failed for {root}" + (f":\n{detail}" if detail else "."))
@@ -445,7 +450,7 @@ def git_status(project: str, fetch: bool = False) -> tuple[str, str]:
 
 def safe_git_pull(project: str, stream: Callable[[str], None] | None = None,
                   controller: ProcessController | None = None) -> None:
-    status, _ = git_status(project, fetch=True)
+    status, _ = git_status(project, fetch=True, controller=controller, stream=stream)
     if status == "Dirty" or status.startswith("Diverged") or status == "No upstream":
         raise ToolError(f"Refusing Git pull because repository state is {status}.")
     if not status.startswith("Behind"):
@@ -466,6 +471,8 @@ def newest_project_input_mtime(project: str) -> float:
             if path.name in SKIP_DIRS:
                 continue
             try:
+                if path.is_symlink():
+                    continue
                 if path.is_dir():
                     queue.append(path)
                 elif path.is_file():
@@ -547,7 +554,7 @@ def build_install(project: str, *, sync: bool = False, force_build: bool = True,
     emit(f"Device: {device.model} [{device.serial}]")
 
     if sync:
-        git, _ = git_status(project, fetch=True)
+        git, _ = git_status(project, fetch=True, controller=controller, stream=emit)
         emit(f"Git: {git}")
         if git == "Dirty" or git.startswith("Diverged") or git == "No upstream":
             raise ToolError(f"Sync & Run stopped: Git state is {git}.")
