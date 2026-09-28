@@ -33,7 +33,44 @@ jobs:
           desktop="$test_home/.local/share/applications/android-build-install.desktop"
           grep -F 'Exec="' "$desktop"
           test -L "$test_home/.local/bin/android-build-install"
+      - name: Symlink launcher resolves repository root
+        run: |
+          test_home="$RUNNER_TEMP/symlink home"
+          data="$test_home/data"
+          venv="$data/android-build-install/venv"
+          mkdir -p "$venv/bin" "$test_home/.local/bin"
+          ln -s "$GITHUB_WORKSPACE/tools/android-build-install-linux/android-build-install" "$test_home/.local/bin/android-build-install"
+          cat > "$venv/bin/python" <<'EOF'
+          #!/usr/bin/env bash
+          if [[ "$1" == "-c" ]]; then exit 1; fi
+          if [[ "$1 $2 $3" == "-m pip install" && "$4" == "--upgrade" ]]; then exit 0; fi
+          if [[ "$1 $2 $3 $4" == "-m pip install -e" ]]; then
+            printf '%s\n' "$5" > "$CAPTURE"
+            exit 0
+          fi
+          exit 0
+          EOF
+          chmod +x "$venv/bin/python"
+          CAPTURE="$RUNNER_TEMP/root-capture.txt" HOME="$test_home" XDG_DATA_HOME="$data" "$test_home/.local/bin/android-build-install"
+          grep -Fx "$GITHUB_WORKSPACE/tools/android-build-install-linux" "$RUNNER_TEMP/root-capture.txt"
       - name: Qt headless smoke test
         env:
           QT_QPA_PLATFORM: offscreen
         run: python -c "from PySide6.QtWidgets import QApplication; from android_build_install_linux.app import MainWindow; app=QApplication([]); w=MainWindow(); w.close()"
+      - name: Project-path launch starts idle
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          temp_project="$RUNNER_TEMP/project path"
+          temp_config="$RUNNER_TEMP/config path"
+          mkdir -p "$temp_project" "$temp_config"
+          XDG_CONFIG_HOME="$temp_config" PROJECT="$temp_project" python - <<'PY'
+          import os
+          from PySide6.QtWidgets import QApplication
+          from android_build_install_linux.app import MainWindow
+          app = QApplication([])
+          window = MainWindow(initial_project=os.environ["PROJECT"])
+          assert not window.busy
+          assert window.selected_project() == os.path.realpath(os.environ["PROJECT"])
+          window.close()
+          PY
