@@ -152,7 +152,8 @@ class MainWindow(QMainWindow):
             core.remember_project(self.initial_project)
         self.reload_rows()
         self.select_project(self.initial_project)
-        self.refresh()
+        if not self.initial_project:
+            self.refresh()
 
     def selected_project(self) -> str | None:
         row = self.table.currentRow()
