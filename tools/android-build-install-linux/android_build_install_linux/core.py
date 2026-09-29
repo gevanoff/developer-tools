@@ -471,7 +471,7 @@ def newest_project_input_mtime(project: str) -> float:
             if path.name in SKIP_DIRS:
                 continue
             try:
-                if path.is_symlink():
+                if path.is_symlink() and path.is_dir():
                     continue
                 if path.is_dir():
                     queue.append(path)
