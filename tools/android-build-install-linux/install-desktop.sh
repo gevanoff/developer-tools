@@ -12,7 +12,7 @@ cat > "$APP_DIR/android-build-install.desktop" <<EOF
 Type=Application
 Name=Android Build and Install
 Comment=Build, sync, install, and launch Android projects
-Exec=$BIN_DIR/android-build-install %f
+Exec="$BIN_DIR/android-build-install" %f
 Terminal=false
 Categories=Development;
 StartupNotify=true
