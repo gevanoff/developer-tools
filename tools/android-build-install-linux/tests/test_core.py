@@ -91,7 +91,12 @@ class CoreTests(unittest.TestCase):
             try:
                 link = root / "linked-input.txt"
                 link.symlink_to(external)
-                self.assertGreaterEqual(core.newest_project_input_mtime(str(root)), external.stat().st_mtime)
+                link_mtime = link.lstat().st_mtime
+                target_mtime = link_mtime + 2.0
+                os.utime(external, (target_mtime, target_mtime))
+                newest = core.newest_project_input_mtime(str(root))
+                self.assertGreater(newest, link_mtime)
+                self.assertGreaterEqual(newest, external.stat().st_mtime)
             finally:
                 external.unlink(missing_ok=True)
 
