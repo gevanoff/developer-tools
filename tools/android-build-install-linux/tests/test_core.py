@@ -83,6 +83,18 @@ class CoreTests(unittest.TestCase):
             (root / "src" / "loop").symlink_to(root, target_is_directory=True)
             self.assertGreaterEqual(core.newest_project_input_mtime(str(root)), source.stat().st_mtime)
 
+    def test_freshness_scan_follows_symlinked_file_target(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            external = root.parent / f"{root.name}-external.txt"
+            external.write_text("linked input", encoding="utf-8")
+            try:
+                link = root / "linked-input.txt"
+                link.symlink_to(external)
+                self.assertGreaterEqual(core.newest_project_input_mtime(str(root)), external.stat().st_mtime)
+            finally:
+                external.unlink(missing_ok=True)
+
     def test_git_fetch_receives_cancellation_controller(self):
         controller = core.ProcessController()
         responses = [
