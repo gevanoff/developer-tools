@@ -88,7 +88,7 @@ command adapter, not automatic toolchain installation or framework detection.
 | --- | --- |
 | `version` | Required `1` when the configuration file exists |
 | `backend` | Optional `auto`; explicit `custom` requires `executable` and `apk` |
-| `executable` | One executable name on PATH or a path; relative paths resolve from the build root |
+| `executable` | Executable path/name; root-local files take precedence over PATH, relative paths resolve from the build root |
 | `arguments` | Custom-build string array; one element per argument, no shell splitting |
 | `preset` | Godot Android export preset name, case-sensitive |
 | `apk` | One exact `.apk` path; relative paths resolve from the build root, absolute paths also work |

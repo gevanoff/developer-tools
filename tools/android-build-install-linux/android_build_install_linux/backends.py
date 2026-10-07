@@ -143,8 +143,8 @@ def command(plan: BuildPlan, gradle_task: str) -> list[str]:
         return [str(wrapper), gradle_task, "--stacktrace"]
     executable = plan.executable
     if not executable:
-        executable = shutil.which("godot") or shutil.which("godot4") or ""
-    elif "/" in executable:
+        executable = shutil.which("godot4") or shutil.which("godot") or ""
+    elif "/" in executable or (plan.root / executable).is_file():
         executable = str((plan.root / executable).resolve())
     else:
         executable = shutil.which(executable) or ""

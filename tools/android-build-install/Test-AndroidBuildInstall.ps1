@@ -114,6 +114,7 @@ try {
         -Project $projectRoot `
         -JavaHome $fakeJavaHome `
         -SkipInstall `
+        -NoUi `
         -SuppressSuccessDialog 2>&1)
     $runExit = [int]$LASTEXITCODE
     Assert-True -Condition ($runExit -eq 0) -Message "Mock build failed with exit code $runExit.`n$($runOutput -join [Environment]::NewLine)"

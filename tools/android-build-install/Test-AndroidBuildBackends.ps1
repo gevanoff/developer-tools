@@ -60,7 +60,7 @@ platform="Android"
     Assert-Fails { Get-AndroidBuildPlan -Root $custom } 'exact .apk'
     Set-Content -LiteralPath $configPath -Value '{broken'
     Assert-Fails { Get-AndroidBuildPlan -Root $custom } 'Invalid'
-    $config.apk = 'output dir/test.apk'; $config.windows.executable = './builder.bat'
+    $config.apk = 'output dir/test.apk'; $config.windows.executable = 'builder.bat'
     $config | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $configPath
 
     if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {

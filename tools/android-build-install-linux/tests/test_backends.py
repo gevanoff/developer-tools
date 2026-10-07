@@ -113,7 +113,7 @@ assert sys.argv[1] == 'literal $HOME; value with spaces'
 assert Path.cwd() == Path(__file__).parent
 Path('output dir/test.apk').write_bytes(b'new apk')
 """)
-        self.config(backend="custom", executable=exe, arguments=["literal $HOME; value with spaces"], apk="output dir/test.apk")
+        self.config(backend="custom", executable=Path(exe).name, arguments=["literal $HOME; value with spaces"], apk="output dir/test.apk")
         calls = self.run_build(sync=True)
         self.assertEqual(calls, [["fake-adb", "-s", "serial", "install", "-r", str(self.root / "output dir/test.apk")]])
         self.assertEqual(core.build_status(str(self.root), self.root, core.Preferences())[0], "Stale")
@@ -129,6 +129,12 @@ Path(sys.argv[6]).write_bytes(b'godot apk')
 """)
         self.config(backend="godot", executable=exe)
         self.assertEqual(len(self.run_build()), 1)
+
+    def test_godot4_precedes_generic_godot_on_path(self):
+        self.godot()
+        plan = backends.select_plan(str(self.root))
+        with mock.patch.object(backends.shutil, "which", side_effect=lambda name: "/bin/true" if name == "godot4" else "/bin/false"):
+            self.assertEqual(backends.command(plan, "ignored")[0], "/bin/true")
 
     def test_failed_missing_and_unchanged_outputs_never_install_or_touch_old_apk(self):
         apk = self.root / "old.apk"

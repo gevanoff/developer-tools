@@ -117,12 +117,12 @@ function Resolve-AndroidBuildCommand {
     }
     $executable = $Plan.Executable
     if (-not $executable) {
-        foreach ($name in @('godot.exe', 'godot4.exe', 'godot')) {
+        foreach ($name in @('godot4.exe', 'godot.exe', 'godot')) {
             $command = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue
             if ($command) { $executable = $command.Source; break }
         }
     }
-    elseif ($executable.Contains('/') -or $executable.Contains('\')) {
+    elseif ($executable.Contains('/') -or $executable.Contains('\') -or (Test-Path -LiteralPath (Join-Path $Plan.Root $executable) -PathType Leaf)) {
         if (-not [IO.Path]::IsPathRooted($executable)) { $executable = Join-Path $Plan.Root $executable }
         $executable = [IO.Path]::GetFullPath($executable)
         if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { $executable = '' }
