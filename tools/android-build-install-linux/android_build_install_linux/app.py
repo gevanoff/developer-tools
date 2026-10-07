@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import json
 import traceback
 from pathlib import Path
 
@@ -13,6 +14,49 @@ from PySide6.QtWidgets import (
 )
 
 from . import core
+from . import backends
+
+
+class BackendDialog(QDialog):
+    def __init__(self, project, parent=None):
+        super().__init__(parent)
+        roots = backends.find_roots(project)
+        if len(roots) > 1:
+            raise backends.BackendError("Select a specific build root before editing its configuration.")
+        self.root = roots[0] if roots else Path(project)
+        self.path = self.root / backends.CONFIG
+        self.setWindowTitle("Godot / custom build configuration")
+        self.resize(720, 480)
+        layout = QVBoxLayout(self)
+        help_text = QLabel("Godot is detected automatically. Configure its editor path/preset here if needed.\n"
+                           "Custom builds run executable + arguments in this folder and must update apk.\n"
+                           "This file contains build instructions: review commands before running them.\n"
+                           f"{self.path}")
+        help_text.setWordWrap(True)
+        layout.addWidget(help_text)
+        self.editor = QPlainTextEdit()
+        default = {"version": 1, "backend": "godot", "apk": "build/android/app-debug.apk"}
+        if not (self.root / "project.godot").is_file():
+            default = {"version": 1, "backend": "custom", "executable": "flutter",
+                       "arguments": ["build", "apk", "--debug"],
+                       "apk": "build/app/outputs/flutter-apk/app-debug.apk"}
+        self.editor.setPlainText(self.path.read_text(encoding="utf-8-sig") if self.path.exists()
+                                 else json.dumps(default, indent=2))
+        layout.addWidget(self.editor)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.save)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def save(self):
+        try:
+            data = json.loads(self.editor.toPlainText())
+            if not isinstance(data, dict) or data.get("version") != 1:
+                raise ValueError("Expected an object with version: 1")
+            core.save_json(self.path, data)
+            self.accept()
+        except (ValueError, OSError) as exc:
+            QMessageBox.critical(self, "Invalid configuration", str(exc))
 
 
 class Signals(QObject):
@@ -50,7 +94,7 @@ class SettingsDialog(QDialog):
         self.launch.setChecked(pref.auto_launch)
 
         form = QFormLayout()
-        form.addRow("Gradle task", self.gradle)
+        form.addRow("Gradle task (Gradle only)", self.gradle)
         form.addRow("Preferred APK", self.apk)
         form.addRow("JAVA_HOME", self.java)
         form.addRow("Preferred device serial", self.device)
@@ -59,6 +103,9 @@ class SettingsDialog(QDialog):
         detect = QPushButton("Detect one connected device")
         detect.clicked.connect(self.detect)
         form.addRow("", detect)
+        backend = QPushButton("Godot / custom build…")
+        backend.clicked.connect(self.backend)
+        form.addRow("Build configuration", backend)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.save)
@@ -70,7 +117,8 @@ class SettingsDialog(QDialog):
 
     def detect(self):
         try:
-            root = core.select_gradle_root(self.project)
+            roots = backends.find_roots(self.project)
+            root = roots[0] if len(roots) == 1 else Path(self.project)
             adb = core.resolve_adb(root)
             devices = [d for d in core.connected_devices(adb) if d.state == "device"]
             if len(devices) == 1:
@@ -82,6 +130,12 @@ class SettingsDialog(QDialog):
                                         "Multiple devices are connected. Paste the desired serial from 'adb devices -l'.")
         except Exception as exc:
             QMessageBox.critical(self, "Detection failed", str(exc))
+
+    def backend(self):
+        try:
+            BackendDialog(self.project, self).exec()
+        except Exception as exc:
+            QMessageBox.critical(self, "Configuration failed", str(exc))
 
     def save(self):
         core.save_preferences(self.project, core.Preferences(

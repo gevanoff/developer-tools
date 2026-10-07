@@ -24,8 +24,7 @@ It preserves the same operating model:
 - Python 3.10 or newer
 - python3-venv
 - Git
-- a compatible JDK
-- an Android project with an executable gradlew
+- a Gradle project with an executable gradlew and compatible JDK, a Godot 4 project, or a configured custom build
 - Android SDK Platform-Tools (adb)
 - Android SDK Build-Tools (aapt2 or aapt) for package inspection/comparison
 - an Android device with USB debugging enabled
@@ -84,14 +83,14 @@ The optimized path:
 1. fetch Git remote-tracking state;
 2. stop on dirty/diverged/no-upstream states that make automatic updating unsafe;
 3. fast-forward with git pull --ff-only only when behind;
-4. reuse a fresh APK when possible;
-5. rebuild when stale or missing;
+4. reuse a fresh Gradle APK when possible;
+5. rebuild when stale or missing; always invoke Godot/custom builders to validate their dependencies;
 6. compare local and installed APK hashes;
 7. skip install when identical;
 8. otherwise run adb install -r;
 9. launch when enabled.
 
-Multiple Gradle roots, multiple devices without a preference, or ambiguous APK outputs are treated as errors rather than guessed.
+Multiple build roots, multiple devices without a preference, or ambiguous APK outputs are treated as errors rather than guessed.
 
 ## Cancellation
 
@@ -113,4 +112,6 @@ The unit tests require no Android device or SDK.
 
 ## Current scope
 
-This first Linux implementation preserves the safety and workflow semantics of the Windows tool while using Linux-native paths and processes. The Windows PowerShell implementation remains untouched.
+The Linux and Windows implementations share Gradle, Godot 4, and custom build behavior while using platform-native paths and processes.
+
+See [Godot and custom builds](../android-build-install/BUILD-BACKENDS.md) for setup and the shared configuration schema. Settings → Godot / custom build opens the configuration editor.

@@ -113,7 +113,7 @@ function Show-Summary {
 function Assert-DeterministicBuildStatus {
     param([Parameter(Mandatory = $true)]$Status)
 
-    if ($Status.BuildStatus -in @('Ambiguous', 'Preferred missing', 'Preferred invalid', 'No Gradle')) {
+    if ($Status.BuildStatus -in @('Ambiguous', 'Preferred missing', 'Preferred invalid', 'No Gradle', 'No project', 'Unknown')) {
         throw "Sync & Run cannot choose a deterministic APK because local build status is '$($Status.BuildStatus)'. Open Settings and configure a preferred APK or correct the project layout. $($Status.BuildDetail)"
     }
 }

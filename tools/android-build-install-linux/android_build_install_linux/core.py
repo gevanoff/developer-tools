@@ -13,11 +13,13 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable, Iterable
 
+from . import backends
+
 APP_NAME = "android-build-install"
 SKIP_DIRS = {".git", ".gradle", ".idea", "build", "node_modules", "out", ".venv", "venv"}
 
 
-class ToolError(RuntimeError):
+class ToolError(backends.BackendError):
     pass
 
 
@@ -192,6 +194,8 @@ def run(argv: list[str], *, cwd: Path | None = None, env: dict[str, str] | None 
                     stream(line.rstrip("\n"))
             rc = proc.wait()
         finally:
+            if proc.stdout:
+                proc.stdout.close()
             if controller:
                 controller.detach(proc)
         if controller and controller.cancelled:
@@ -364,6 +368,15 @@ def apk_candidates(gradle_root: Path, max_depth: int = 2) -> list[Path]:
 
 
 def deterministic_apk(project: str, gradle_root: Path, pref: Preferences) -> Path | None:
+    plan = backends.plan_for_root(gradle_root) if any(
+        (gradle_root / name).is_file() for name in (backends.CONFIG, "project.godot")
+    ) else None
+    if plan and plan.apk:
+        if pref.preferred_apk:
+            preferred = (Path(project) / Path(pref.preferred_apk).expanduser()).resolve()
+            if preferred != plan.apk:
+                raise ToolError("Preferred APK conflicts with the backend output. Clear Preferred APK or match the configured apk.")
+        return plan.apk if plan.apk.is_file() else None
     all_candidates = all_apk_candidates(gradle_root)
     if not all_candidates:
         return None
@@ -489,6 +502,9 @@ def build_status(project: str, gradle_root: Path, pref: Preferences) -> tuple[st
         return ("Preferred missing" if candidates else "No APK"), ""
     if apk is None:
         return ("Ambiguous" if candidates else "No APK"), ""
+    if any((gradle_root / name).is_file() for name in (backends.CONFIG, "project.godot")):
+        if backends.plan_for_root(gradle_root).backend != "gradle":
+            return "Stale", "Export/build required; non-Gradle dependency freshness is delegated to the builder."
     return ("Fresh" if newest_project_input_mtime(project) <= apk.stat().st_mtime else "Stale"), str(apk)
 
 
@@ -513,13 +529,12 @@ def device_status(project: str, gradle_root: Path, pref: Preferences) -> tuple[s
 
 def project_status(project: str, fetch: bool = False) -> ProjectStatus:
     pref = load_preferences(project)
-    roots = find_gradle_roots(project)
     git, git_detail = git_status(project, fetch=fetch)
-    if len(roots) != 1:
-        return ProjectStatus(git, "Ambiguous" if roots else "No Gradle", "Unknown",
-                             git_detail or ("Select the specific Gradle project folder." if roots else "No gradlew found."))
-    gradle_root = roots[0]
-    build, build_detail = build_status(project, gradle_root, pref)
+    try:
+        gradle_root = backends.select_plan(project).root
+        build, build_detail = build_status(project, gradle_root, pref)
+    except backends.BackendError as exc:
+        return ProjectStatus(git, "Configuration needed", "Unknown", str(exc))
     device, device_detail = device_status(project, gradle_root, pref)
     return ProjectStatus(git, build, device, "\n".join(x for x in (git_detail, build_detail, device_detail) if x))
 
@@ -536,10 +551,11 @@ def build_install(project: str, *, sync: bool = False, force_build: bool = True,
                   controller: ProcessController | None = None) -> str:
     project = str(Path(project).expanduser().resolve())
     pref = load_preferences(project)
-    gradle_root = select_gradle_root(project)
+    plan = backends.select_plan(project)
+    gradle_root = plan.root
     adb = resolve_adb(gradle_root)
     device = resolve_device(adb, pref.device_serial)
-    env = java_env(pref)
+    env = {}
     env["ANDROID_SERIAL"] = device.serial
     log = log_file(project)
 
@@ -550,7 +566,7 @@ def build_install(project: str, *, sync: bool = False, force_build: bool = True,
             stream(line)
 
     emit(f"Project: {project}")
-    emit(f"Gradle root: {gradle_root}")
+    emit(f"Build backend: {plan.backend}; root: {gradle_root}")
     emit(f"Device: {device.model} [{device.serial}]")
 
     if sync:
@@ -560,13 +576,28 @@ def build_install(project: str, *, sync: bool = False, force_build: bool = True,
             raise ToolError(f"Sync & Run stopped: Git state is {git}.")
         safe_git_pull(project, emit, controller)
 
+    # Git pull may change the build contract or project layout.
+    plan = backends.select_plan(project)
+    gradle_root = plan.root
     build, _ = build_status(project, gradle_root, pref)
     built = force_build or build in {"Stale", "No APK", "Preferred missing", "Ambiguous"}
     if built:
-        result = run([str(gradle_root / "gradlew"), pref.gradle_task, "--stacktrace"],
-                     cwd=gradle_root, env=env, stream=emit, controller=controller)
+        argv = backends.command(plan, pref.gradle_task)
+        if plan.backend == "gradle" or pref.java_home:
+            env.update(java_env(pref))
+        previous_output = None
+        if plan.apk:
+            plan.apk.parent.mkdir(parents=True, exist_ok=True)
+            previous_output = plan.apk.stat() if plan.apk.is_file() else None
+        result = run(argv, cwd=gradle_root, env=env, stream=emit, controller=controller)
         if result.returncode:
-            raise ToolError(f"Gradle failed with exit code {result.returncode}. See {log}")
+            raise ToolError(f"{plan.backend} failed with exit code {result.returncode}. See {log}")
+        if plan.apk:
+            current = plan.apk.stat() if plan.apk.is_file() else None
+            if current is None or current.st_size == 0 or (previous_output is not None and
+                    (current.st_mtime_ns, current.st_size) ==
+                    (previous_output.st_mtime_ns, previous_output.st_size)):
+                raise ToolError("Build did not produce/update the configured APK; refusing to install old output.")
     else:
         emit(f"Build skipped: local build is {build}.")
 

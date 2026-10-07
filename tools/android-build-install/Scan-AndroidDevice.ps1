@@ -7,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'AndroidBuildBackends.ps1')
 . (Join-Path $PSScriptRoot 'AndroidFileHash.ps1')
 
 # Windows PowerShell 5.1 can bind a single null/empty placeholder to a
@@ -82,35 +83,8 @@ function Invoke-NativeCaptured {
 }
 
 function Get-GradleRoots {
-    param(
-        [Parameter(Mandatory = $true)][string]$Root,
-        [int]$MaxDepth = 2
-    )
-
-    $skipNames = @('.git', '.gradle', '.idea', 'build', 'node_modules', 'out')
-    $queue = New-Object System.Collections.Queue
-    $queue.Enqueue([pscustomobject]@{ Path = $Root; Depth = 0 })
-    $results = @()
-
-    while ($queue.Count -gt 0) {
-        $node = $queue.Dequeue()
-        if (Test-Path -LiteralPath (Join-Path $node.Path 'gradlew.bat') -PathType Leaf) {
-            $results += [System.IO.Path]::GetFullPath($node.Path)
-            continue
-        }
-
-        if ($node.Depth -ge $MaxDepth) { continue }
-
-        foreach ($child in Get-ChildItem -LiteralPath $node.Path -Directory -ErrorAction SilentlyContinue) {
-            if ($skipNames -contains $child.Name) { continue }
-            $queue.Enqueue([pscustomobject]@{
-                Path = $child.FullName
-                Depth = $node.Depth + 1
-            })
-        }
-    }
-
-    return @($results | Select-Object -Unique)
+    param([string]$Root, [int]$MaxDepth = 2)
+    Get-AndroidProjectRoots -Root $Root -MaxDepth $MaxDepth
 }
 
 function Get-LocalSdkPath {
@@ -222,6 +196,12 @@ function Get-ApkCandidates {
         [int]$MaxModuleDepth = 2
     )
 
+    $plan = Get-AndroidBuildPlan -Root $GradleRoot
+    if ($plan.Apk) {
+        if (Test-Path -LiteralPath $plan.Apk -PathType Leaf) { Get-Item -LiteralPath $plan.Apk }
+        return
+    }
+
     $skipNames = @('.git', '.gradle', '.idea', 'build', 'node_modules', 'out')
     $queue = New-Object System.Collections.Queue
     $queue.Enqueue([pscustomobject]@{ Path = $GradleRoot; Depth = 0 })
@@ -261,6 +241,7 @@ function Resolve-LocalApk {
         [string]$Preferred
     )
 
+    Assert-AndroidBackendApkPreference -Plan (Get-AndroidBuildPlan -Root $GradleRoot) -ProjectRoot $ProjectRoot -Preferred $Preferred
     $candidates = @(Get-ApkCandidates -GradleRoot $GradleRoot)
     if ($candidates.Count -eq 0) {
         return [pscustomobject]@{ Apk = $null; Detail = 'No local APK has been built.' }
@@ -376,16 +357,20 @@ New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 foreach ($projectPath in $validProjects) {
     $gradleRoots = @(Get-GradleRoots -Root $projectPath)
     if ($gradleRoots.Count -eq 0) {
-        New-ScanResult -ProjectPath $projectPath -Status 'Unknown' -Detail 'No Gradle wrapper found.' -Device $serial
+        New-ScanResult -ProjectPath $projectPath -Status 'Unknown' -Detail 'No supported project found; configure android-build-install.json for a custom build.' -Device $serial
         continue
     }
     if ($gradleRoots.Count -gt 1) {
-        New-ScanResult -ProjectPath $projectPath -Status 'Unknown' -Detail 'Multiple Gradle roots found; scan target is ambiguous.' -Device $serial
+        New-ScanResult -ProjectPath $projectPath -Status 'Unknown' -Detail 'Multiple build roots found; scan target is ambiguous.' -Device $serial
         continue
     }
 
     $gradleRoot = $gradleRoots[0]
-    $local = Resolve-LocalApk -ProjectRoot $projectPath -GradleRoot $gradleRoot -Preferred $PreferredApk
+    try { $local = Resolve-LocalApk -ProjectRoot $projectPath -GradleRoot $gradleRoot -Preferred $PreferredApk }
+    catch {
+        New-ScanResult -ProjectPath $projectPath -Status 'Unknown' -Detail $_.Exception.Message -Device $serial
+        continue
+    }
     if ($null -eq $local.Apk) {
         $status = if ($local.Detail -like 'No local APK*') { 'No local build' } else { 'Unknown' }
         New-ScanResult -ProjectPath $projectPath -Status $status -Detail $local.Detail -Device $serial
