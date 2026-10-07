@@ -115,3 +115,9 @@ The unit tests require no Android device or SDK.
 The Linux and Windows implementations share Gradle, Godot 4, and custom build behavior while using platform-native paths and processes.
 
 See [Godot and custom builds](../android-build-install/BUILD-BACKENDS.md) for setup and the shared configuration schema. Settings → Godot / custom build opens the configuration editor.
+
+The Git column includes the checked-out branch alongside its status, for example
+`main | Current` or `feature/camera-flip | Dirty`. Detached checkouts show
+`detached @ <short SHA>`. Hover over the row/cell to read the full branch name
+and status details if the column is truncated. Branch identity is local and
+remains available when remote or build-configuration checks fail.

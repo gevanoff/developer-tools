@@ -585,7 +585,7 @@ function Select-SavedProjectAction {
     $list.MultiSelect = $false
     $list.ShowItemToolTips = $true
     [void]$list.Columns.Add('Project', 170)
-    [void]$list.Columns.Add('Git', 120)
+    [void]$list.Columns.Add('Git', 280)
     [void]$list.Columns.Add('Local Build', 130)
     [void]$list.Columns.Add('Device', 130)
     [void]$list.Columns.Add('Path', 590)
@@ -878,12 +878,13 @@ function Select-SavedProjectAction {
 
         while ($item.SubItems.Count -lt 6) { [void]$item.SubItems.Add('') }
         $item.Text = [string]$Result.Project
-        $item.SubItems[1].Text = [string]$Result.GitStatus
+        $gitDisplay = if ($Result.GitBranch) { "$($Result.GitBranch) | $($Result.GitStatus)" } else { [string]$Result.GitStatus }
+        $item.SubItems[1].Text = $gitDisplay
         $item.SubItems[2].Text = [string]$Result.BuildStatus
         $item.SubItems[3].Text = [string]$Result.DeviceStatus
         $item.SubItems[4].Text = [string]$Result.ProjectPath
         $item.SubItems[5].Text = $CheckedText
-        $item.ToolTipText = "Git: $($Result.GitDetail)`nBuild: $($Result.BuildDetail)`nDevice: $($Result.DeviceDetail)"
+        $item.ToolTipText = "Git: $gitDisplay`n$($Result.GitDetail)`nBuild: $($Result.BuildDetail)`nDevice: $($Result.DeviceDetail)"
     }
 
     $newUnknownStatus = {

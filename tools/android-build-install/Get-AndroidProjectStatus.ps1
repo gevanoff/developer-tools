@@ -198,6 +198,18 @@ function Get-NewestProjectInput {
     return $newest
 }
 
+function Get-GitBranch {
+    param([string]$ProjectPath)
+    $command = Get-Command git.exe -ErrorAction SilentlyContinue
+    if ($null -eq $command) { $command = Get-Command git -ErrorAction SilentlyContinue }
+    if ($null -eq $command) { return '' }
+    $branch = Invoke-NativeCaptured -FilePath $command.Source -Arguments @('-C', $ProjectPath, 'symbolic-ref', '--quiet', '--short', 'HEAD')
+    if ($branch.ExitCode -eq 0 -and $branch.Output.Count -gt 0) { return $branch.Output[-1].Trim() }
+    $commit = Invoke-NativeCaptured -FilePath $command.Source -Arguments @('-C', $ProjectPath, 'rev-parse', '--short', 'HEAD')
+    if ($commit.ExitCode -eq 0 -and $commit.Output.Count -gt 0) { return "detached @ $($commit.Output[-1].Trim())" }
+    return ''
+}
+
 function Get-GitStatus {
     param([Parameter(Mandatory = $true)][string]$ProjectPath)
 
@@ -269,13 +281,15 @@ function Get-GitStatus {
 $results = @(
 foreach ($projectItem in @($Project)) {
     if ([string]::IsNullOrWhiteSpace($projectItem)) { continue }
+    $gitBranch = ''
+    $gitStatus = $null
 
     try {
         $projectPath = Normalize-Path -Path $projectItem
         if (-not (Test-Path -LiteralPath $projectPath -PathType Container)) {
             [pscustomobject]@{
                 ProjectPath = $projectPath; Project = Split-Path -Leaf $projectPath
-                GitStatus = 'Missing'; GitDetail = 'Project directory does not exist.'
+                GitStatus = 'Missing'; GitBranch = ''; GitDetail = 'Project directory does not exist.'
                 BuildStatus = 'Unknown'; BuildDetail = ''
                 DeviceStatus = 'Unknown'; DeviceDetail = ''
                 Device = ''
@@ -284,6 +298,7 @@ foreach ($projectItem in @($Project)) {
         }
 
         $preference = Get-Preference -ProjectPath $projectPath
+        $gitBranch = Get-GitBranch -ProjectPath $projectPath
         $gitStatus = Get-GitStatus -ProjectPath $projectPath
 
         $gradleRoots = @(Get-GradleRoots -Root $projectPath)
@@ -356,6 +371,7 @@ foreach ($projectItem in @($Project)) {
             ProjectPath = $projectPath
             Project = Split-Path -Leaf $projectPath
             GitStatus = $gitStatus.Status
+            GitBranch = $gitBranch
             GitDetail = $gitStatus.Detail
             BuildStatus = $buildStatus.Status
             BuildDetail = $buildStatus.Detail
@@ -368,7 +384,9 @@ foreach ($projectItem in @($Project)) {
         [pscustomobject]@{
             ProjectPath = "$projectItem"
             Project = Split-Path -Leaf "$projectItem"
-            GitStatus = 'Unknown'; GitDetail = $_.Exception.Message
+            GitStatus = if ($null -ne $gitStatus) { $gitStatus.Status } else { 'Unknown' }
+            GitBranch = $gitBranch
+            GitDetail = if ($null -ne $gitStatus) { $gitStatus.Detail } else { $_.Exception.Message }
             BuildStatus = 'Unknown'; BuildDetail = $_.Exception.Message
             DeviceStatus = 'Unknown'; DeviceDetail = $_.Exception.Message
             Device = ''
