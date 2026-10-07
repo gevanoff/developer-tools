@@ -91,6 +91,11 @@ class ProjectStatus:
     build: str
     device: str
     detail: str = ""
+    branch: str = ""
+
+    @property
+    def git_display(self) -> str:
+        return f"{self.branch} | {self.git}" if self.branch else self.git
 
 
 def config_root() -> Path:
@@ -431,6 +436,18 @@ def installed_apk_hash(adb: str, device: Device, package: str) -> str | None:
         return sha256(local) if pulled.returncode == 0 and local.is_file() else None
 
 
+def git_branch(project: str) -> str:
+    """Read checkout identity even when upstream/fetch/build checks fail."""
+    try:
+        branch = run(["git", "-C", project, "symbolic-ref", "--quiet", "--short", "HEAD"])
+        if branch.returncode == 0:
+            return branch.stdout.strip()
+        commit = run(["git", "-C", project, "rev-parse", "--short", "HEAD"])
+        return f"detached @ {commit.stdout.strip()}" if commit.returncode == 0 else ""
+    except OSError:
+        return ""
+
+
 def git_status(project: str, fetch: bool = False,
                controller: ProcessController | None = None,
                stream: Callable[[str], None] | None = None) -> tuple[str, str]:
@@ -529,14 +546,19 @@ def device_status(project: str, gradle_root: Path, pref: Preferences) -> tuple[s
 
 def project_status(project: str, fetch: bool = False) -> ProjectStatus:
     pref = load_preferences(project)
-    git, git_detail = git_status(project, fetch=fetch)
+    branch = git_branch(project)
+    try:
+        git, git_detail = git_status(project, fetch=fetch)
+    except (ToolError, OSError) as exc:
+        git, git_detail = "Unknown", str(exc)
     try:
         gradle_root = backends.select_plan(project).root
         build, build_detail = build_status(project, gradle_root, pref)
     except backends.BackendError as exc:
-        return ProjectStatus(git, "Configuration needed", "Unknown", str(exc))
+        return ProjectStatus(git, "Configuration needed", "Unknown",
+                             "\n".join(x for x in (git_detail, str(exc)) if x), branch)
     device, device_detail = device_status(project, gradle_root, pref)
-    return ProjectStatus(git, build, device, "\n".join(x for x in (git_detail, build_detail, device_detail) if x))
+    return ProjectStatus(git, build, device, "\n".join(x for x in (git_detail, build_detail, device_detail) if x), branch)
 
 
 def log_file(project: str) -> Path:

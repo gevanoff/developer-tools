@@ -401,3 +401,9 @@ Backend regression tests (also run by the Windows CI workflow):
 ```powershell
 .\Test-AndroidBuildBackends.ps1
 ```
+
+The Git column includes the checked-out branch alongside its status, for example
+`main | Current` or `feature/camera-flip | Dirty`. Detached checkouts show
+`detached @ <short SHA>`. Hover over the row/cell to read the full branch name
+and status details if the column is truncated. Branch identity is local and
+remains available when remote or build-configuration checks fail.

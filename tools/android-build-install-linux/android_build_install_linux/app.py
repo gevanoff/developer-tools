@@ -167,6 +167,7 @@ class MainWindow(QMainWindow):
         self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(["Project", "Git", "Local Build", "Device"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.table.setColumnWidth(1, 280)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.doubleClicked.connect(lambda _: self.sync_run())
@@ -307,9 +308,9 @@ class MainWindow(QMainWindow):
                 st = results.get(project)
                 if not st:
                     continue
-                for col, value in enumerate((st.git, st.build, st.device), 1):
+                for col, value in enumerate((st.git_display, st.build, st.device), 1):
                     self.table.item(row, col).setText(value)
-                    self.table.item(row, col).setToolTip(st.detail)
+                    self.table.item(row, col).setToolTip(f"Git: {st.git_display}\n{st.detail}")
 
         self.start("Refreshing status…", task, done)
 
