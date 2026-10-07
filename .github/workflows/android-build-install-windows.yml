@@ -1,0 +1,23 @@
+name: Android Build Install Windows
+on:
+  push:
+    paths:
+      - "tools/android-build-install/**"
+      - ".github/workflows/android-build-install-windows.yml"
+  pull_request:
+    paths:
+      - "tools/android-build-install/**"
+      - ".github/workflows/android-build-install-windows.yml"
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: powershell
+        working-directory: tools/android-build-install
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./Test-AndroidBuildBackends.ps1
+      - run: ./Test-AndroidBuildInstall.ps1

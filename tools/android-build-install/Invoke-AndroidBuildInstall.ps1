@@ -14,6 +14,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'AndroidBuildBackends.ps1')
 Add-Type -AssemblyName System.Windows.Forms
 
 function Show-Error {
@@ -109,34 +110,8 @@ function Invoke-NativeCaptured {
 }
 
 function Get-GradleRoots {
-    param(
-        [Parameter(Mandatory = $true)][string]$Root,
-        [int]$MaxDepth = 2
-    )
-
-    $skipNames = @('.git', '.gradle', '.idea', 'build', 'node_modules', 'out')
-    $queue = New-Object System.Collections.Queue
-    $queue.Enqueue([pscustomobject]@{ Path = $Root; Depth = 0 })
-    $results = @()
-
-    while ($queue.Count -gt 0) {
-        $node = $queue.Dequeue()
-        if (Test-Path -LiteralPath (Join-Path $node.Path 'gradlew.bat') -PathType Leaf) {
-            $results += [System.IO.Path]::GetFullPath($node.Path)
-            continue
-        }
-        if ($node.Depth -ge $MaxDepth) { continue }
-
-        foreach ($child in Get-ChildItem -LiteralPath $node.Path -Directory -ErrorAction SilentlyContinue) {
-            if ($skipNames -contains $child.Name) { continue }
-            $queue.Enqueue([pscustomobject]@{
-                Path = $child.FullName
-                Depth = $node.Depth + 1
-            })
-        }
-    }
-
-    return @($results | Select-Object -Unique)
+    param([string]$Root, [int]$MaxDepth = 2)
+    Get-AndroidProjectRoots -Root $Root -MaxDepth $MaxDepth
 }
 
 function Get-LocalSdkPath {
@@ -323,6 +298,12 @@ function Get-ApkCandidates {
         [int]$MaxModuleDepth = 2
     )
 
+    $plan = Get-AndroidBuildPlan -Root $GradleRoot
+    if ($plan.Apk) {
+        if (Test-Path -LiteralPath $plan.Apk -PathType Leaf) { Get-Item -LiteralPath $plan.Apk }
+        return
+    }
+
     $skipNames = @('.git', '.gradle', '.idea', 'build', 'node_modules', 'out')
     $queue = New-Object System.Collections.Queue
     $queue.Enqueue([pscustomobject]@{ Path = $GradleRoot; Depth = 0 })
@@ -436,11 +417,12 @@ try {
 
     $gradleRoots = @(Get-GradleRoots -Root $Project)
     if ($gradleRoots.Count -eq 0) {
-        throw "No gradlew.bat was found in the selected directory or within two directory levels below it.`n`nSelected directory:`n$Project"
+        throw "No supported project was found. Select a Godot/Gradle folder or configure android-build-install.json for a custom build.`n`nSelected directory:`n$Project"
     }
-    $gradleRoot = Select-ItemFromList -Prompt 'Multiple Gradle projects were found. Choose the Android project to build:' -Items $gradleRoots -Label { param($item) $item } `
-        -NoUiMessage 'Multiple Gradle roots were found. Add and select the specific Android project folder containing the intended gradlew.bat, rather than its parent repository, before running Build & Install from the dashboard.'
-    $gradlew = Join-Path $gradleRoot 'gradlew.bat'
+    $gradleRoot = Select-ItemFromList -Prompt 'Multiple build projects were found. Choose the Android project to build:' -Items $gradleRoots -Label { param($item) $item } `
+        -NoUiMessage 'Multiple build roots were found. Add and select the specific Android project folder containing the intended build configuration, rather than its parent repository, before running Build & Install from the dashboard.'
+    $plan = Get-AndroidBuildPlan -Root $gradleRoot
+    Assert-AndroidBackendApkPreference -Plan $plan -ProjectRoot $Project -Preferred $PreferredApk
 
     $needsDevice = (-not $SkipInstall) -or $AutoLaunch
     $adb = $null
@@ -455,7 +437,7 @@ try {
     }
 
     $java = '(not needed)'
-    if (-not $SkipBuild) {
+    if (-not $SkipBuild -and ($plan.Backend -eq 'gradle' -or $JavaHome)) {
         $java = Resolve-Java -OverrideJavaHome $JavaHome
     }
 
@@ -464,7 +446,8 @@ try {
     Write-Host '========================='
     Write-Host ''
     Write-Host "Selected folder: $Project"
-    Write-Host "Gradle root:     $gradleRoot"
+    Write-Host "Build root:      $gradleRoot"
+    Write-Host "Build backend:   $($plan.Backend)"
     Write-Host "Gradle task:     $GradleTask"
     Write-Host "Java:            $java"
     Write-Host "Build:           $(if ($SkipBuild) { 'skip' } else { 'run' })"
@@ -478,14 +461,24 @@ try {
     Write-Host ''
 
     if (-not $SkipBuild) {
+        $buildCommand = Resolve-AndroidBuildCommand -Plan $plan -GradleTask $GradleTask
+        $previousOutput = $null
+        if ($plan.Apk) {
+            if (Test-Path -LiteralPath $plan.Apk -PathType Leaf) {
+                $old = Get-Item -LiteralPath $plan.Apk
+                $previousOutput = @($old.LastWriteTimeUtc.Ticks, $old.Length)
+            }
+            [IO.Directory]::CreateDirectory((Split-Path -Parent $plan.Apk)) | Out-Null
+        }
         Push-Location $gradleRoot
         try {
-            Write-Host "Running: gradlew.bat $GradleTask --stacktrace"
+            Write-Host "Running: $($buildCommand.Executable) $($buildCommand.Arguments -join ' ')"
             Write-Host ''
             $previousPreference = $ErrorActionPreference
             try {
                 $ErrorActionPreference = 'Continue'
-                & $gradlew $GradleTask '--stacktrace'
+                $buildArguments = @($buildCommand.Arguments)
+                & $buildCommand.Executable @buildArguments
                 $gradleExitCode = [int]$LASTEXITCODE
             }
             finally {
@@ -497,16 +490,24 @@ try {
         }
 
         if ($gradleExitCode -ne 0) {
-            throw "Gradle failed with exit code $gradleExitCode. The APK was not installed."
+            throw "$($plan.Backend) failed with exit code $gradleExitCode. The APK was not installed."
         }
     }
     else {
-        Write-Host 'Skipping Gradle build and reusing existing APK output.'
+        Write-Host 'Skipping build and reusing existing APK output.'
+    }
+
+    if (-not $SkipBuild -and $plan.Apk) {
+        if (-not (Test-Path -LiteralPath $plan.Apk -PathType Leaf)) { throw 'Build did not produce the configured APK; refusing to install old output.' }
+        $current = Get-Item -LiteralPath $plan.Apk
+        if ($current.Length -eq 0 -or ($null -ne $previousOutput -and $current.LastWriteTimeUtc.Ticks -eq $previousOutput[0] -and $current.Length -eq $previousOutput[1])) {
+            throw 'Build did not update the configured APK; refusing to install old output.'
+        }
     }
 
     $apkCandidates = @(Get-ApkCandidates -GradleRoot $gradleRoot)
     if ($apkCandidates.Count -eq 0) {
-        throw "No APK was found under build\outputs\apk."
+        throw "No APK was found at the expected build output."
     }
 
     # A pure build-only stage does not need to choose an APK. This is important
@@ -594,7 +595,7 @@ try {
         }
     }
 
-    $buildSummary = if ($SkipBuild) { 'Build skipped; existing APK reused.' } else { 'Gradle build completed successfully.' }
+    $buildSummary = if ($SkipBuild) { 'Build skipped; existing APK reused.' } else { "$($plan.Backend) build completed successfully." }
     $deviceSummary = if ($null -ne $device) { "Device: $($device.Model) [$($device.Serial)]" } else { 'Device: not required for this stage.' }
     $apkSummary = if ($null -ne $apk) { $apk.Name } else { "($($apkCandidates.Count) APK output(s) available)" }
     $successMessage = @"

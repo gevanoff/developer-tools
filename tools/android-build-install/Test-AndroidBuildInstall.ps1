@@ -143,7 +143,7 @@ try {
     $ambiguityExit = [int]$LASTEXITCODE
     $ambiguityText = $ambiguityOutput -join [Environment]::NewLine
     Assert-True -Condition ($ambiguityExit -ne 0) -Message 'A background build with ambiguous Gradle roots unexpectedly succeeded.'
-    Assert-True -Condition ($ambiguityText -match 'Multiple Gradle roots were found') -Message "The background ambiguity failure was not actionable.`n$ambiguityText"
+    Assert-True -Condition ($ambiguityText -match 'Multiple build roots were found') -Message "The background ambiguity failure was not actionable.`n$ambiguityText"
     Assert-True -Condition ($ambiguityText -notmatch 'Choose 1-') -Message "The background ambiguity path attempted to prompt for console input.`n$ambiguityText"
 
     $scannerFailure = ''

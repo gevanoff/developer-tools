@@ -6,6 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'AndroidBuildBackends.ps1')
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 . (Join-Path $PSScriptRoot 'WindowsTaskbarIdentity.ps1')
@@ -140,26 +141,8 @@ function Make-RelativeIfInsideProject {
 }
 
 function Get-GradleRoots {
-    param([Parameter(Mandatory = $true)][string]$Root)
-
-    $skipNames = @('.git', '.gradle', '.idea', 'build', 'node_modules', 'out')
-    $queue = New-Object System.Collections.Queue
-    $queue.Enqueue([pscustomobject]@{ Path = $Root; Depth = 0 })
-    $results = @()
-
-    while ($queue.Count -gt 0) {
-        $node = $queue.Dequeue()
-        if (Test-Path -LiteralPath (Join-Path $node.Path 'gradlew.bat') -PathType Leaf) {
-            $results += $node.Path
-            continue
-        }
-        if ($node.Depth -ge 2) { continue }
-        foreach ($child in Get-ChildItem -LiteralPath $node.Path -Directory -ErrorAction SilentlyContinue) {
-            if ($skipNames -contains $child.Name) { continue }
-            $queue.Enqueue([pscustomobject]@{ Path = $child.FullName; Depth = $node.Depth + 1 })
-        }
-    }
-    return @($results | Select-Object -Unique)
+    param([string]$Root, [int]$MaxDepth = 2)
+    Get-AndroidProjectRoots -Root $Root -MaxDepth $MaxDepth
 }
 
 function Get-LocalSdkPath {
@@ -393,7 +376,7 @@ $launch.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.F
 $form.Controls.Add($launch)
 
 $hint = New-Object System.Windows.Forms.Label
-$hint.Text = 'Blank fields use normal defaults. Detect stores the adb serial for this project.'
+$hint.Text = 'Gradle task applies only to Gradle. Godot/custom builds use the configuration below. Detect stores the adb serial.'
 $hint.AutoSize = $false
 $hint.AutoEllipsis = $true
 $hint.Location = New-Object System.Drawing.Point(150, 258)
@@ -402,6 +385,16 @@ $hint.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
     [System.Windows.Forms.AnchorStyles]::Left -bor
     [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($hint)
+
+$backendButton = New-Object System.Windows.Forms.Button
+$backendButton.Text = 'Godot / custom build...'
+$backendButton.Size = New-Object System.Drawing.Size(200, 30)
+$backendButton.Location = New-Object System.Drawing.Point(150, 298)
+$backendButton.Add_Click({
+    try { & (Join-Path $PSScriptRoot 'Edit-AndroidBuildBackend.ps1') -Project $projectPath }
+    catch { [void][System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Build configuration') }
+})
+$form.Controls.Add($backendButton)
 
 $reset = New-Object System.Windows.Forms.Button
 $reset.Text = 'Reset Defaults'

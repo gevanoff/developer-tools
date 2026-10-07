@@ -1,20 +1,20 @@
 # Android Build and Install
 
-Build Android projects with their Gradle wrappers, keep local repositories current, compare installed APKs with local builds, and run the right build/install/launch steps from one Windows 11 dashboard.
+Build Android projects with Gradle, Godot 4, or a configured custom builder, keep local repositories current, compare installed APKs with local builds, and run the right build/install/launch steps from one Windows 11 dashboard.
 
 ## Requirements
 
 - Windows 11
 - Windows PowerShell 5.1 or later
 - Git for Windows for Git status/update features
-- an Android project containing `gradlew.bat`
-- a JDK compatible with the project's Gradle / Android Gradle Plugin versions
+- a Gradle project containing `gradlew.bat`, a Godot 4 project, or a configured custom build
+- the selected backend's toolchain (a compatible JDK for Gradle; Godot editor/export templates for Godot)
 - Android SDK Platform-Tools (`adb.exe`)
 - Android SDK Build-Tools (`aapt2.exe` or `aapt.exe`) for package inspection, device comparison, and auto-launch
 - an Android device with USB debugging enabled
 - the appropriate Windows USB driver when the device requires one
 
-The project remains responsible for its normal Gradle dependencies and Android SDK components.
+The project remains responsible for its build dependencies and Android SDK components. See [Godot and custom builds](BUILD-BACKENDS.md) for setup, examples, and the shared Windows/Linux configuration contract.
 
 ## Normal workflow
 
@@ -26,8 +26,8 @@ The project remains responsible for its normal Gradle dependencies and Android S
 
 The available actions are:
 
-- **Sync & Run** — safely update Git when needed, rebuild only when the local APK is stale/missing, install only when the device differs, and optionally launch the app;
-- **Build & Install** — always run the configured Gradle build, install the selected APK, and optionally launch it;
+- **Sync & Run** — safely update Git when needed, rebuild stale/missing Gradle APKs, run Godot/custom builders to validate their dependencies, install only when the device differs, and optionally launch the app;
+- **Build & Install** — always run the configured build, install the selected APK, and optionally launch it;
 - **Git Pull** — explicitly run the safe fast-forward-only repository update;
 - **Refresh Status** — refresh Git remote state, local APK freshness, and device comparison;
 - **Settings...** — configure persistent project-specific defaults including a preferred device;
@@ -62,7 +62,7 @@ Use **Cancel** to stop the active PowerShell process and its child process tree,
 
 Build stages execute inside a single logging wrapper rather than a nested redirected PowerShell process. When Gradle starts a persistent daemon, the dashboard waits for the actual build/install process—not for output handles inherited by that daemon—so a successful install can complete immediately while the reusable Gradle daemon remains available for later builds.
 
-Background dashboard operations never wait for hidden console input. If multiple Gradle roots, devices, or APKs require a choice, the operation stops with an actionable message directing you to select a narrower project folder or save the appropriate project setting.
+Background dashboard operations never wait for hidden console input. If multiple build roots, devices, or APKs require a choice, the operation stops with an actionable message directing you to select a narrower project folder or save the appropriate project setting.
 
 The notification-area icon remains available while the dashboard is running. Double-click it or choose **Open Dashboard** to restore and activate the window. Its menu can cancel the current operation or status refresh, and a notification reports operation completion when the dashboard is not running a UI test.
 
@@ -395,3 +395,9 @@ and a non-destructive expected failure path.
 - configurable status-refresh timeouts for unusually large repositories;
 - richer Android App Bundle / split-install workflows;
 - optional per-project launch activity override for apps without a conventional launcher activity.
+
+Backend regression tests (also run by the Windows CI workflow):
+
+```powershell
+.\Test-AndroidBuildBackends.ps1
+```

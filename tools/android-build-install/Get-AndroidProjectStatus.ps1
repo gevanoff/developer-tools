@@ -8,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'AndroidBuildBackends.ps1')
 $scanner = Join-Path $PSScriptRoot 'Scan-AndroidDevice.ps1'
 
 function Invoke-NativeCaptured {
@@ -76,34 +77,8 @@ function Get-Preference {
 }
 
 function Get-GradleRoots {
-    param(
-        [Parameter(Mandatory = $true)][string]$Root,
-        [int]$MaxDepth = 2
-    )
-
-    $skipNames = @('.git', '.gradle', '.idea', 'build', 'node_modules', 'out')
-    $queue = New-Object System.Collections.Queue
-    $queue.Enqueue([pscustomobject]@{ Path = $Root; Depth = 0 })
-    $results = @()
-
-    while ($queue.Count -gt 0) {
-        $node = $queue.Dequeue()
-        if (Test-Path -LiteralPath (Join-Path $node.Path 'gradlew.bat') -PathType Leaf) {
-            $results += [System.IO.Path]::GetFullPath($node.Path)
-            continue
-        }
-        if ($node.Depth -ge $MaxDepth) { continue }
-
-        foreach ($child in Get-ChildItem -LiteralPath $node.Path -Directory -ErrorAction SilentlyContinue) {
-            if ($skipNames -contains $child.Name) { continue }
-            $queue.Enqueue([pscustomobject]@{
-                Path = $child.FullName
-                Depth = $node.Depth + 1
-            })
-        }
-    }
-
-    return @($results | Select-Object -Unique)
+    param([string]$Root, [int]$MaxDepth = 2)
+    Get-AndroidProjectRoots -Root $Root -MaxDepth $MaxDepth
 }
 
 function Get-ApkCandidates {
@@ -111,6 +86,12 @@ function Get-ApkCandidates {
         [Parameter(Mandatory = $true)][string]$GradleRoot,
         [int]$MaxModuleDepth = 2
     )
+
+    $plan = Get-AndroidBuildPlan -Root $GradleRoot
+    if ($plan.Apk) {
+        if (Test-Path -LiteralPath $plan.Apk -PathType Leaf) { Get-Item -LiteralPath $plan.Apk }
+        return
+    }
 
     $skipNames = @('.git', '.gradle', '.idea', 'build', 'node_modules', 'out')
     $queue = New-Object System.Collections.Queue
@@ -150,6 +131,7 @@ function Resolve-LocalApk {
         [string]$PreferredApk
     )
 
+    Assert-AndroidBackendApkPreference -Plan (Get-AndroidBuildPlan -Root $GradleRoot) -ProjectRoot $ProjectRoot -Preferred $PreferredApk
     $candidates = @(Get-ApkCandidates -GradleRoot $GradleRoot)
     if ($candidates.Count -eq 0) {
         return [pscustomobject]@{ Apk = $null; Status = 'No APK'; Detail = 'No local APK has been built.' }
@@ -306,15 +288,20 @@ foreach ($projectItem in @($Project)) {
 
         $gradleRoots = @(Get-GradleRoots -Root $projectPath)
         if ($gradleRoots.Count -eq 0) {
-            $buildStatus = [pscustomobject]@{ Status = 'No Gradle'; Detail = 'No Gradle wrapper found.'; Apk = $null }
+            $buildStatus = [pscustomobject]@{ Status = 'No project'; Detail = 'No supported project found; configure android-build-install.json for a custom build.'; Apk = $null }
         }
         elseif ($gradleRoots.Count -gt 1) {
-            $buildStatus = [pscustomobject]@{ Status = 'Ambiguous'; Detail = 'Multiple Gradle roots found.'; Apk = $null }
+            $buildStatus = [pscustomobject]@{ Status = 'Ambiguous'; Detail = 'Multiple build roots found; select the specific project folder.'; Apk = $null }
         }
         else {
             $local = Resolve-LocalApk -ProjectRoot $projectPath -GradleRoot $gradleRoots[0] -PreferredApk $preference.preferredApk
             if ($null -eq $local.Apk) {
                 $buildStatus = [pscustomobject]@{ Status = $local.Status; Detail = $local.Detail; Apk = $null }
+            }
+            elseif ((Get-AndroidBuildPlan -Root $gradleRoots[0]).Backend -ne 'gradle') {
+                $buildStatus = [pscustomobject]@{
+                    Status = 'Stale'; Detail = 'Export/build required; dependency freshness is delegated to the builder.'; Apk = $local.Apk
+                }
             }
             else {
                 $newest = Get-NewestProjectInput -ProjectRoot $projectPath

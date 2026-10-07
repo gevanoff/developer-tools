@@ -97,7 +97,7 @@ The Android build/install run failed.
 A detailed log has been saved to:
 $logPath
 
-The log will now open in Notepad so the actual Gradle or adb error can be copied.
+The log will now open in Notepad so the actual builder or adb error can be copied.
 "@
 
     [System.Windows.Forms.MessageBox]::Show(
