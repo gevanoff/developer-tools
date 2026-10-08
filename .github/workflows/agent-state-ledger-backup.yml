@@ -1,0 +1,27 @@
+name: Agent State Ledger Backup CI
+
+on:
+  push:
+    paths:
+      - "tools/agent-state-ledger-backup/**"
+      - ".github/workflows/agent-state-ledger-backup.yml"
+  pull_request:
+    paths:
+      - "tools/agent-state-ledger-backup/**"
+      - ".github/workflows/agent-state-ledger-backup.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/agent-state-ledger-backup
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e .
+      - run: python -m unittest discover -s tests -v
+      - run: python -m compileall -q src tests
+      - run: bash -n bin/ledger-backup-run
