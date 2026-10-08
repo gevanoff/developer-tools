@@ -116,10 +116,7 @@ class DriveClient:
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
 
-        scopes = [
-            "https://www.googleapis.com/auth/drive.file",
-            "https://www.googleapis.com/auth/drive.metadata.readonly",
-        ]
+        scopes = ["https://www.googleapis.com/auth/drive"]
         sa_file = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE")
         sa_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
         oauth_json = os.getenv("GOOGLE_AUTHORIZED_USER_JSON")
@@ -158,6 +155,12 @@ class DriveClient:
 
     def rename(self, file_id: str, name: str) -> None:
         self.service.files().update(fileId=file_id, body={"name": name}, fields="id,name").execute()
+
+    def metadata(self, file_id: str) -> dict[str, Any]:
+        return self.service.files().get(
+            fileId=file_id,
+            fields="id,name,parents,trashed",
+        ).execute()
 
     def delete(self, file_id: str) -> None:
         self.service.files().delete(fileId=file_id).execute()
@@ -345,6 +348,9 @@ def upload_verified_snapshot(
             raise BackupError("Drive manifest readback checksum mismatch")
         uploaded["manifest.json"] = manifest_id
         drive.rename(folder_id, final_name)
+        folder = drive.metadata(folder_id)
+        if folder.get("name") != final_name or root_folder_id not in folder.get("parents", []):
+            raise BackupError("Drive snapshot folder rename/parent readback mismatch")
         return folder_id, uploaded
     except Exception:
         # Keep the partial folder for diagnosis; its name makes it ineligible for retention pruning.
