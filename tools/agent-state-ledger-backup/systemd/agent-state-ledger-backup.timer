@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Agent State Ledger backup
+
+[Timer]
+OnCalendar=*-*-* 04:00:00 America/Los_Angeles
+Persistent=true
+RandomizedDelaySec=10m
+Unit=agent-state-ledger-backup.service
+
+[Install]
+WantedBy=timers.target
