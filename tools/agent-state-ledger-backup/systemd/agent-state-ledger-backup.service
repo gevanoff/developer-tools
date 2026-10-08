@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 Environment=ENV_FILE=%h/.config/agent-state-ledger-backup/env
-ExecStart=%h/.local/libexec/ledger-backup-run
+ExecStart=/usr/bin/bash %h/.local/libexec/ledger-backup-run
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
