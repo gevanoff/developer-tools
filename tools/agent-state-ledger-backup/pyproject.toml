@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-state-ledger-backup"
+version = "0.1.0"
+description = "Deterministic, verified Airtable Agent State Ledger backups to Google Drive"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "google-api-python-client>=2.149,<3",
+  "google-auth>=2.35,<3",
+  "requests>=2.32,<3",
+]
+
+[project.scripts]
+ledger-backup = "ledger_backup.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
