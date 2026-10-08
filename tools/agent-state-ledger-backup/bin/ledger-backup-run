@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ENV_FILE="${ENV_FILE:-$HOME/.config/agent-state-ledger-backup/env}"
+if [[ ! -r "$ENV_FILE" ]]; then
+  printf 'ledger-backup: missing readable environment file: %s\n' "$ENV_FILE" >&2
+  exit 78
+fi
+set -a
+# shellcheck disable=SC1090
+. "$ENV_FILE"
+set +a
+exec "${LEDGER_BACKUP_BIN:-$HOME/.local/bin/ledger-backup}" run
