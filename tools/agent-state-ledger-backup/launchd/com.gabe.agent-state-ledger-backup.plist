@@ -4,12 +4,12 @@
 <dict>
   <key>Label</key><string>com.gabe.agent-state-ledger-backup</string>
   <key>ProgramArguments</key>
-  <array><string>/Users/gabe/.local/libexec/ledger-backup-run</string></array>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>$HOME/.local/libexec/ledger-backup-run</string>
+  </array>
   <key>StartCalendarInterval</key>
   <dict><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer></dict>
-  <key>EnvironmentVariables</key>
-  <dict><key>ENV_FILE</key><string>/Users/gabe/.config/agent-state-ledger-backup/env</string></dict>
-  <key>StandardOutPath</key><string>/Users/gabe/Library/Logs/agent-state-ledger-backup.log</string>
-  <key>StandardErrorPath</key><string>/Users/gabe/Library/Logs/agent-state-ledger-backup.err</string>
 </dict>
 </plist>
