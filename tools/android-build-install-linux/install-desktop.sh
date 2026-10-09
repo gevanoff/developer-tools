@@ -11,7 +11,7 @@ cat > "$APP_DIR/android-build-install.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=DroidRun
-Icon=$ROOT/../android-build-install/assets/droidrun-icon.png
+Icon=$ROOT/android_build_install_linux/assets/droidrun-icon.png
 Comment=Build, sync, install, and launch Android projects
 Exec="$BIN_DIR/android-build-install" %f
 Terminal=false

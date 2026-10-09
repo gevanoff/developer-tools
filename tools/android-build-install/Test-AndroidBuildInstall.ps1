@@ -131,6 +131,22 @@ public static class TestAdb {
         if ($null -ne $shortcutShell) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shortcutShell) }
     }
 
+    # Exercise legacy ownership checks in a temporary Start Menu, without
+    # touching the user's installed shortcut.
+    $installerAst = [System.Management.Automation.Language.Parser]::ParseFile($shortcutInstaller, [ref]$null, [ref]$null)
+    $legacyFunction = $installerAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Remove-MatchingLegacyShortcut' }, $true)
+    . ([scriptblock]::Create($legacyFunction.Extent.Text))
+    $legacyShortcutPath = Join-Path $testRoot 'Start Menu\Android Build and Install.lnk'
+    $sessionPath = $session
+    $powershellPath = Join-Path $PSHOME 'powershell.exe'
+    Copy-Item -LiteralPath $testShortcut -Destination $legacyShortcutPath
+    Remove-MatchingLegacyShortcut
+    Assert-True (-not (Test-Path -LiteralPath $legacyShortcutPath)) 'Matching legacy shortcut was not removed.'
+    $sessionPath = Join-Path $testRoot 'another checkout\AndroidBuildInstall-Session.ps1'
+    Copy-Item -LiteralPath $testShortcut -Destination $legacyShortcutPath
+    Remove-MatchingLegacyShortcut
+    Assert-True (Test-Path -LiteralPath $legacyShortcutPath) 'Legacy shortcut from another checkout was removed.'
+
     $runOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner `
         -Project $projectRoot `
         -JavaHome $fakeJavaHome `

@@ -153,7 +153,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.initial_project = initial_project
         self.setWindowTitle("DroidRun — Linux")
-        self.setWindowIcon(QIcon(str(Path(__file__).resolve().parents[2] / "android-build-install" / "assets" / "droidrun-icon.png")))
+        self.setWindowIcon(QIcon(str(Path(__file__).resolve().parent / "assets" / "droidrun-icon.png")))
         self.resize(1120, 720)
         self.pool = QThreadPool.globalInstance()
         self.busy = False

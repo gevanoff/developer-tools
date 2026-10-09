@@ -14,3 +14,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["android_build_install_linux"]
+
+[tool.setuptools.package-data]
+android_build_install_linux = ["assets/*.png"]

@@ -16,11 +16,31 @@ if (-not $ShortcutPath) {
     $legacyShortcutPath = Join-Path $programsFolder 'Android Build and Install.lnk'
 }
 $ShortcutPath = [System.IO.Path]::GetFullPath($ShortcutPath)
+$sessionPath = Join-Path $PSScriptRoot 'AndroidBuildInstall-Session.ps1'
+$powershellPath = Join-Path $PSHOME 'powershell.exe'
+
+function Remove-MatchingLegacyShortcut {
+    if (-not $legacyShortcutPath -or -not (Test-Path -LiteralPath $legacyShortcutPath -PathType Leaf)) { return }
+    $legacyShell = New-Object -ComObject WScript.Shell
+    $legacyShortcut = $null
+    try {
+        $legacyShortcut = $legacyShell.CreateShortcut($legacyShortcutPath)
+        if ($legacyShortcut.TargetPath -ieq $powershellPath -and
+            $legacyShortcut.Arguments -eq "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$sessionPath`"") {
+            Remove-Item -LiteralPath $legacyShortcutPath -Force
+        }
+    }
+    finally {
+        if ($null -ne $legacyShortcut) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($legacyShortcut) }
+        [void][Runtime.InteropServices.Marshal]::ReleaseComObject($legacyShell)
+    }
+}
 if ([System.IO.Path]::GetExtension($ShortcutPath) -ine '.lnk') {
     throw "The shortcut path must end in .lnk: $ShortcutPath"
 }
 
 if ($Remove) {
+    Remove-MatchingLegacyShortcut
     if (Test-Path -LiteralPath $ShortcutPath -PathType Leaf) {
         Remove-Item -LiteralPath $ShortcutPath -Force
     }
@@ -35,9 +55,7 @@ if ($Remove) {
     return
 }
 
-$sessionPath = Join-Path $PSScriptRoot 'AndroidBuildInstall-Session.ps1'
 $iconPath = Join-Path $PSScriptRoot 'assets\droidrun.ico'
-$powershellPath = Join-Path $PSHOME 'powershell.exe'
 foreach ($requiredPath in @($sessionPath, $iconPath, $powershellPath)) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Required launcher file was not found: $requiredPath"
@@ -70,21 +88,7 @@ finally {
 
 # Remove the old default name only after the replacement is installed, and
 # only when it points to this checkout. Preserve shortcuts owned by others.
-if ($legacyShortcutPath -and (Test-Path -LiteralPath $legacyShortcutPath -PathType Leaf)) {
-    $legacyShell = New-Object -ComObject WScript.Shell
-    $legacyShortcut = $null
-    try {
-        $legacyShortcut = $legacyShell.CreateShortcut($legacyShortcutPath)
-        if ($legacyShortcut.TargetPath -ieq $powershellPath -and
-            $legacyShortcut.Arguments -eq "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$sessionPath`"") {
-            Remove-Item -LiteralPath $legacyShortcutPath -Force
-        }
-    }
-    finally {
-        if ($null -ne $legacyShortcut) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($legacyShortcut) }
-        [void][Runtime.InteropServices.Marshal]::ReleaseComObject($legacyShell)
-    }
-}
+Remove-MatchingLegacyShortcut
 
 if (-not $Quiet) {
     [System.Windows.Forms.MessageBox]::Show(
