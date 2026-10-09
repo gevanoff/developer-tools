@@ -118,3 +118,7 @@ platform="Android"
     Write-Host 'PASS: Android build backends.'
 }
 finally { Remove-Item -LiteralPath $testRoot -Recurse -Force }
+
+# Expected native-command failures above must not leak into a CI shell's exit
+# status after every assertion has passed. Unhandled assertions still throw.
+$global:LASTEXITCODE = 0
