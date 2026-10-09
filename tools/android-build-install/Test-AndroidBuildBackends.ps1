@@ -87,8 +87,38 @@ platform="Android"
         @{ version = 1; backend = 'godot'; preset = 'Android Debug'; executable = $fakeGodot } | ConvertTo-Json | Set-Content -LiteralPath $godotConfig
         & $invoke -Project $godot -SkipInstall -NoUi -SuppressSuccessDialog -NoProcessExit
         Assert-True (Test-Path -LiteralPath (Join-Path $godot 'build/android/app-debug.apk')) 'Godot export did not produce expected APK.'
+        $statusScript = Join-Path $PSScriptRoot 'Get-AndroidProjectStatus.ps1'
+        $godotApk = Get-Item -LiteralPath (Join-Path $godot 'build/android/app-debug.apk')
+        Assert-True ((& $statusScript -Project $godot -SkipDevice).BuildStatus -eq 'Fresh') 'Successful Godot export must be fresh.'
+        foreach ($cache in @('.godot', '.import')) {
+            [IO.Directory]::CreateDirectory((Join-Path $godot $cache)) | Out-Null
+            $cacheFile = Join-Path $godot "$cache/cache.txt"
+            Set-Content -LiteralPath $cacheFile -Value 'generated cache'
+            (Get-Item -LiteralPath $cacheFile).LastWriteTimeUtc = $godotApk.LastWriteTimeUtc.AddMinutes(1)
+        }
+        Assert-True ((& $statusScript -Project $godot -SkipDevice).BuildStatus -eq 'Fresh') 'Godot caches must not invalidate an export.'
+        foreach ($inputName in @('project.godot', 'export_presets.cfg', 'android-build-install.json', 'lesson.gd', 'words.json', 'texture.png')) {
+            $inputPath = Join-Path $godot $inputName
+            if (-not (Test-Path -LiteralPath $inputPath)) { Set-Content -LiteralPath $inputPath -Value 'project input' }
+            $inputFile = Get-Item -LiteralPath $inputPath
+            $inputFile.LastWriteTimeUtc = $godotApk.LastWriteTimeUtc.AddSeconds(1)
+            Assert-True ((& $statusScript -Project $godot -SkipDevice).BuildStatus -eq 'Stale') "Changed $inputName must invalidate Godot export."
+            $inputFile.LastWriteTimeUtc = $godotApk.LastWriteTimeUtc.AddSeconds(-1)
+        }
+        Set-Content -LiteralPath $fakeGodot -Encoding ASCII -Value @('@echo off', 'exit /b 7')
+        (Get-Item -LiteralPath $fakeGodot).LastWriteTimeUtc = $godotApk.LastWriteTimeUtc.AddSeconds(1)
+        $godotMtime = $godotApk.LastWriteTimeUtc
+        Assert-Fails { & $invoke -Project $godot -SkipInstall -NoUi -NoProcessExit } 'failed with exit code 7'
+        Assert-True ((Get-Item -LiteralPath $godotApk.FullName).LastWriteTimeUtc -eq $godotMtime) 'Failed Godot build must not refresh old APK.'
+        Assert-True ((& $statusScript -Project $godot -SkipDevice).BuildStatus -eq 'Stale') 'Failed Godot build must remain stale.'
+        Remove-Item -LiteralPath $godotApk.FullName
+        Assert-True ((& $statusScript -Project $godot -SkipDevice).BuildStatus -eq 'No APK') 'Missing Godot APK must be reported.'
     }
     else { Write-Host 'Windows process/UI integration skipped on this OS; helper/parser checks ran.' }
     Write-Host 'PASS: Android build backends.'
 }
 finally { Remove-Item -LiteralPath $testRoot -Recurse -Force }
+
+# Expected native-command failures above must not leak into a CI shell's exit
+# status after every assertion has passed. Unhandled assertions still throw.
+$global:LASTEXITCODE = 0

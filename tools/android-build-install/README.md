@@ -1,4 +1,15 @@
-# Android Build and Install
+# DroidRun
+
+Previously named **Android Build and Install**. Existing launcher filenames,
+project configuration, saved settings, logs, and taskbar application identity
+remain compatible. Re-run the shortcut installer to create **DroidRun** in Start;
+it removes the old default shortcut only when it targets this checkout. Restart
+the dashboard to load the new title and icon. Existing taskbar pins may need to
+be unpinned and pinned again from the new Start entry if Windows caches the old icon.
+
+The icon is a bright lime tile with a dark phone and play mark. Its PNG and
+multi-size ICO can be regenerated with `python assets/generate_icon.py` (Pillow
+required only for regeneration).
 
 Build Android projects with Gradle, Godot 4, or a configured custom builder, keep local repositories current, compare installed APKs with local builds, and run the right build/install/launch steps from one Windows 11 dashboard.
 
@@ -26,7 +37,7 @@ The project remains responsible for its build dependencies and Android SDK compo
 
 The available actions are:
 
-- **Sync & Run** — safely update Git when needed, rebuild stale/missing Gradle APKs, run Godot/custom builders to validate their dependencies, install only when the device differs, and optionally launch the app;
+- **Sync & Run** — safely update Git when needed, rebuild stale/missing Gradle or Godot APKs, run custom builders to validate their dependencies, install only when the device differs, and optionally launch the app;
 - **Build & Install** — always run the configured build, install the selected APK, and optionally launch it;
 - **Git Pull** — explicitly run the safe fast-forward-only repository update;
 - **Refresh Status** — refresh Git remote state, local APK freshness, and device comparison;
@@ -39,11 +50,11 @@ The dashboard is resizable and scales with Windows display settings. It uses a d
 
 ## Start menu and taskbar shortcut
 
-Double-click `Install-Start-Menu-Shortcut.bat` once to install a per-user **Android Build and Install** shortcut. It uses the tool's own icon and does not require administrator access.
+Double-click `Install-Start-Menu-Shortcut.bat` once to install a per-user **DroidRun** shortcut. It uses the tool's own icon and does not require administrator access.
 
 To pin it on Windows 11:
 
-1. Open Start and search for **Android Build and Install**.
+1. Open Start and search for **DroidRun**.
 2. Right-click the result and choose **Pin to taskbar**. If Windows puts the action under a submenu, choose **More**, then **Pin to taskbar**.
 
 You can also launch the dashboard normally, right-click its distinct taskbar icon while it is running, and choose **Pin to taskbar**. The dashboard supplies Windows with a stable application identity, relaunch command, display name, and icon resource, so the pinned item starts this tool rather than a generic PowerShell window.
@@ -93,7 +104,7 @@ Typical states are:
 - **Ambiguous** — multiple APK outputs exist and no deterministic target can be selected;
 - **Preferred missing** — the configured preferred APK is not currently present.
 
-Fresh/stale detection is deliberately conservative. Generated/build/cache directories such as `.git`, `.gradle`, `.idea`, `build`, `node_modules`, and `out` are ignored; other project files are treated as potential inputs so asset changes are not missed.
+Fresh/stale detection is deliberately conservative. Generated/build/cache directories such as `.git`, `.gradle`, `.godot`, `.import`, `.idea`, `build`, `node_modules`, and `out` are ignored; other project files are treated as potential inputs so asset changes are not missed.
 
 ### Device
 

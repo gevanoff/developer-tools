@@ -159,7 +159,7 @@ $settingsEditor = Join-Path $PSScriptRoot 'Edit-AndroidProjectPreferences.ps1'
 $gitUpdater = Join-Path $PSScriptRoot 'Update-AndroidRepo.ps1'
 $statusHelper = Join-Path $PSScriptRoot 'Get-AndroidProjectStatus.ps1'
 $syncRunner = Join-Path $PSScriptRoot 'Invoke-AndroidSyncAndRun.ps1'
-$appIconPath = Join-Path $PSScriptRoot 'assets\android-build-install.ico'
+$appIconPath = Join-Path $PSScriptRoot 'assets\droidrun.ico'
 $taskbarRelaunchCommand = "`"$(Join-Path $PSHOME 'powershell.exe')`" -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$PSCommandPath`""
 $taskbarIconResource = "$appIconPath,0"
 $appIcon = $null
@@ -330,7 +330,7 @@ function Show-Reports {
     param([System.Windows.Forms.IWin32Window]$Owner)
 
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = 'Android Build and Install - Reports'
+    $form.Text = 'DroidRun - Reports'
     $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
     if ($null -ne $appIcon) { $form.Icon = $appIcon }
     $form.StartPosition = if ($null -ne $Owner) {
@@ -454,7 +454,7 @@ function Show-DeviceScan {
     }
 
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = 'Android Build and Install - Device Scan'
+    $form.Text = 'DroidRun - Device Scan'
     $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
     if ($null -ne $appIcon) { $form.Icon = $appIcon }
     $form.StartPosition = if ($null -ne $Owner) {
@@ -529,7 +529,7 @@ function Select-SavedProjectAction {
     param([string]$InitialProject)
 
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = 'Android Build and Install'
+    $form.Text = 'DroidRun'
     $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
     if ($null -ne $appIcon) { $form.Icon = $appIcon }
     $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
@@ -545,7 +545,7 @@ function Select-SavedProjectAction {
                     $form.Handle,
                     $appUserModelId,
                     $taskbarRelaunchCommand,
-                    'Android Build and Install',
+                    'DroidRun',
                     $taskbarIconResource
                 )
                 $taskbarIdentityState.Applied = $true
@@ -745,7 +745,7 @@ function Select-SavedProjectAction {
 
         $trayIcon = New-Object System.Windows.Forms.NotifyIcon
         $trayIcon.Icon = $appIcon
-        $trayIcon.Text = 'Android Build and Install'
+        $trayIcon.Text = 'DroidRun'
         $trayIcon.ContextMenuStrip = $trayMenu
         $trayIcon.Visible = -not $isUiSmokeTest
 
@@ -928,8 +928,8 @@ function Select-SavedProjectAction {
         $wasCancelled = $dashboardState.StatusRefresh.CancelRequested
         $dashboardState.StatusRefresh = $null
         $statusTimer.Stop()
-        $form.Text = 'Android Build and Install'
-        if ($null -ne $trayIcon) { $trayIcon.Text = 'Android Build and Install' }
+        $form.Text = 'DroidRun'
+        if ($null -ne $trayIcon) { $trayIcon.Text = 'DroidRun' }
         $statusTimestamp.Text = if ($Message) {
             $Message
         } else {
@@ -991,8 +991,8 @@ function Select-SavedProjectAction {
         $refreshState.TimedOut = $false
         $position = $refreshState.Index + 1
         $statusTimestamp.Text = "Checking $position/$($refreshState.Projects.Count): $(Split-Path -Leaf $projectPath)"
-        $form.Text = 'Android Build and Install - Refreshing status...'
-        if ($null -ne $trayIcon) { $trayIcon.Text = "Android Build and Install - Status $position/$($refreshState.Projects.Count)" }
+        $form.Text = 'DroidRun - Refreshing status...'
+        if ($null -ne $trayIcon) { $trayIcon.Text = "DroidRun - Status $position/$($refreshState.Projects.Count)" }
 
         try {
             $runnerInstance.Start($powershellPath, (Join-ProcessArguments -Arguments $arguments), $PSScriptRoot)
@@ -1243,10 +1243,10 @@ function Select-SavedProjectAction {
         $operation.Runner.Dispose()
         $dashboardState.Operation = $null
         $operationTimer.Stop()
-        $form.Text = 'Android Build and Install'
+        $form.Text = 'DroidRun'
         if ($null -ne $trayIcon -and -not $isUiSmokeTest) {
-            $trayIcon.Text = 'Android Build and Install'
-            $trayIcon.BalloonTipTitle = 'Android Build and Install'
+            $trayIcon.Text = 'DroidRun'
+            $trayIcon.BalloonTipTitle = 'DroidRun'
             $trayIcon.BalloonTipText = $operationStatus.Text
             $trayIcon.BalloonTipIcon = if ($exitCode -eq 0) {
                 [System.Windows.Forms.ToolTipIcon]::Info
@@ -1386,8 +1386,8 @@ function Select-SavedProjectAction {
         try {
             $processRunner.Start($powershellPath, $processArguments, $PSScriptRoot)
             $operationStatus.Text = "$displayName is running..."
-            $form.Text = "Android Build and Install - $displayName"
-            if ($null -ne $trayIcon) { $trayIcon.Text = "Android Build and Install - $displayName" }
+            $form.Text = "DroidRun - $displayName"
+            if ($null -ne $trayIcon) { $trayIcon.Text = "DroidRun - $displayName" }
             $operationTimer.Start()
         }
         catch {
@@ -1531,7 +1531,7 @@ function Select-SavedProjectAction {
         $answer = [System.Windows.Forms.MessageBox]::Show(
             $form,
             "$($dashboardState.Operation.DisplayName) is still running. Cancel it and exit?",
-            'Android Build and Install',
+            'DroidRun',
             [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Warning
         )

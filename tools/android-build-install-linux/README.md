@@ -1,6 +1,6 @@
-# Android Build and Install — Ubuntu/Linux
+# DroidRun — Ubuntu/Linux
 
-Ubuntu/Linux counterpart to the Windows Android Build and Install dashboard in this repository.
+Ubuntu/Linux counterpart to the Windows DroidRun dashboard in this repository.
 
 It preserves the same operating model:
 
@@ -83,8 +83,8 @@ The optimized path:
 1. fetch Git remote-tracking state;
 2. stop on dirty/diverged/no-upstream states that make automatic updating unsafe;
 3. fast-forward with git pull --ff-only only when behind;
-4. reuse a fresh Gradle APK when possible;
-5. rebuild when stale or missing; always invoke Godot/custom builders to validate their dependencies;
+4. reuse a fresh Gradle or Godot APK when possible;
+5. rebuild when stale or missing; always invoke custom builders to validate their dependencies;
 6. compare local and installed APK hashes;
 7. skip install when identical;
 8. otherwise run adb install -r;

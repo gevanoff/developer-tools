@@ -22,11 +22,13 @@ $scanner = Join-Path $toolRoot 'Scan-AndroidDevice.ps1'
 $fileHashHelper = Join-Path $toolRoot 'AndroidFileHash.ps1'
 $shortcutInstaller = Join-Path $toolRoot 'Install-AndroidBuildInstallShortcut.ps1'
 $taskbarIdentityHelper = Join-Path $toolRoot 'WindowsTaskbarIdentity.ps1'
-$iconPng = Join-Path $toolRoot 'assets\android-build-install-icon.png'
-$iconPath = Join-Path $toolRoot 'assets\android-build-install.ico'
+$iconPng = Join-Path $toolRoot 'assets\droidrun-icon.png'
+$iconPath = Join-Path $toolRoot 'assets\droidrun.ico'
 $tempBase = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
 $testRoot = Join-Path $tempBase ("WindowsTools Android Test {0}" -f [Guid]::NewGuid().ToString('N'))
 $previousLocalAppData = $env:LOCALAPPDATA
+$previousAndroidSdkRoot = $env:ANDROID_SDK_ROOT
+$previousAndroidHome = $env:ANDROID_HOME
 
 try {
     foreach ($script in Get-ChildItem -LiteralPath $toolRoot -Filter '*.ps1' -File) {
@@ -45,6 +47,25 @@ try {
     . $fileHashHelper
     $hashProbe = Join-Path $testRoot 'SHA-256 probe with spaces.txt'
     New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
+    # These tests use fake APKs and must not discover real devices or start an
+    # SDK adb daemon (which can inherit CI output handles and hang the suite).
+    $fakeSdk = Join-Path $testRoot 'fake android sdk'
+    $fakePlatformTools = Join-Path $fakeSdk 'platform-tools'
+    New-Item -ItemType Directory -Path $fakePlatformTools -Force | Out-Null
+    Add-Type -OutputAssembly (Join-Path $fakePlatformTools 'adb.exe') -OutputType ConsoleApplication -TypeDefinition @'
+public static class TestAdb {
+    public static int Main(string[] args) {
+        if (args.Length > 0 && args[0] == "devices") {
+            System.Console.WriteLine("List of devices attached");
+            return 0;
+        }
+        System.Console.Error.WriteLine("Unexpected adb operation in isolated test.");
+        return 2;
+    }
+}
+'@
+    $env:ANDROID_SDK_ROOT = $fakeSdk
+    $env:ANDROID_HOME = $fakeSdk
     Set-Content -LiteralPath $hashProbe -Value 'abc' -Encoding ASCII -NoNewline
     Assert-True -Condition ((Get-AndroidFileSha256 -LiteralPath $hashProbe) -eq 'BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD') -Message 'The built-in .NET SHA-256 helper returned an incorrect hash.'
     Assert-True -Condition ((Get-Content -LiteralPath $scanner -Raw) -notmatch '\bGet-FileHash\b') -Message 'The device scanner still depends on the unavailable Get-FileHash command.'
@@ -88,7 +109,7 @@ try {
     (Get-Item -LiteralPath $sourcePath).LastWriteTimeUtc = [DateTime]::UtcNow
     $env:LOCALAPPDATA = Join-Path $testRoot 'state with spaces'
 
-    $testShortcut = Join-Path $testRoot 'Start Menu\Android Build and Install.lnk'
+    $testShortcut = Join-Path $testRoot 'Start Menu\DroidRun.lnk'
     $shortcutOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $shortcutInstaller `
         -ShortcutPath $testShortcut `
         -Quiet 2>&1)
@@ -96,19 +117,35 @@ try {
     Assert-True -Condition ($shortcutExit -eq 0) -Message "Start menu shortcut creation failed with exit code $shortcutExit.`n$($shortcutOutput -join [Environment]::NewLine)"
     Assert-True -Condition (Test-Path -LiteralPath $testShortcut -PathType Leaf) -Message 'The Start menu shortcut was not created.'
     . $taskbarIdentityHelper
-    Assert-True -Condition ([WindowsTools.TaskbarIdentity]::GetShortcutAppId($testShortcut) -eq (Get-AndroidBuildInstallAppId)) -Message 'The shortcut does not have the Android Build and Install AppUserModelID.'
+    Assert-True -Condition ([WindowsTools.TaskbarIdentity]::GetShortcutAppId($testShortcut) -eq (Get-AndroidBuildInstallAppId)) -Message 'The shortcut does not have the DroidRun AppUserModelID.'
     $shortcutShell = New-Object -ComObject WScript.Shell
     $loadedShortcut = $null
     try {
         $loadedShortcut = $shortcutShell.CreateShortcut($testShortcut)
         Assert-True -Condition ($loadedShortcut.TargetPath -ieq (Join-Path $PSHOME 'powershell.exe')) -Message "The shortcut target is incorrect: $($loadedShortcut.TargetPath)"
         Assert-True -Condition ($loadedShortcut.Arguments.Contains('AndroidBuildInstall-Session.ps1')) -Message "The shortcut arguments are incorrect: $($loadedShortcut.Arguments)"
-        Assert-True -Condition ($loadedShortcut.IconLocation.Contains('android-build-install.ico')) -Message "The shortcut icon is incorrect: $($loadedShortcut.IconLocation)"
+        Assert-True -Condition ($loadedShortcut.IconLocation.Contains('droidrun.ico')) -Message "The shortcut icon is incorrect: $($loadedShortcut.IconLocation)"
     }
     finally {
         if ($null -ne $loadedShortcut) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($loadedShortcut) }
         if ($null -ne $shortcutShell) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shortcutShell) }
     }
+
+    # Exercise legacy ownership checks in a temporary Start Menu, without
+    # touching the user's installed shortcut.
+    $installerAst = [System.Management.Automation.Language.Parser]::ParseFile($shortcutInstaller, [ref]$null, [ref]$null)
+    $legacyFunction = $installerAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Remove-MatchingLegacyShortcut' }, $true)
+    . ([scriptblock]::Create($legacyFunction.Extent.Text))
+    $legacyShortcutPath = Join-Path $testRoot 'Start Menu\Android Build and Install.lnk'
+    $sessionPath = $session
+    $powershellPath = Join-Path $PSHOME 'powershell.exe'
+    Copy-Item -LiteralPath $testShortcut -Destination $legacyShortcutPath
+    Remove-MatchingLegacyShortcut
+    Assert-True (-not (Test-Path -LiteralPath $legacyShortcutPath)) 'Matching legacy shortcut was not removed.'
+    $sessionPath = Join-Path $testRoot 'another checkout\AndroidBuildInstall-Session.ps1'
+    Copy-Item -LiteralPath $testShortcut -Destination $legacyShortcutPath
+    Remove-MatchingLegacyShortcut
+    Assert-True (Test-Path -LiteralPath $legacyShortcutPath) 'Legacy shortcut from another checkout was removed.'
 
     $runOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner `
         -Project $projectRoot `
@@ -210,6 +247,8 @@ try {
 }
 finally {
     $env:LOCALAPPDATA = $previousLocalAppData
+    $env:ANDROID_SDK_ROOT = $previousAndroidSdkRoot
+    $env:ANDROID_HOME = $previousAndroidHome
     $resolvedTestRoot = [System.IO.Path]::GetFullPath($testRoot)
     if ($resolvedTestRoot.StartsWith($tempBase, [System.StringComparison]::OrdinalIgnoreCase) -and
         (Split-Path -Leaf $resolvedTestRoot) -like 'WindowsTools Android Test *' -and
