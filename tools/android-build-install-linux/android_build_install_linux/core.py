@@ -16,7 +16,7 @@ from typing import Callable, Iterable
 from . import backends
 
 APP_NAME = "android-build-install"
-SKIP_DIRS = {".git", ".gradle", ".idea", "build", "node_modules", "out", ".venv", "venv"}
+SKIP_DIRS = {".git", ".gradle", ".godot", ".import", ".idea", "build", "node_modules", "out", ".venv", "venv"}
 
 
 class ToolError(backends.BackendError):
@@ -520,8 +520,8 @@ def build_status(project: str, gradle_root: Path, pref: Preferences) -> tuple[st
     if apk is None:
         return ("Ambiguous" if candidates else "No APK"), ""
     if any((gradle_root / name).is_file() for name in (backends.CONFIG, "project.godot")):
-        if backends.plan_for_root(gradle_root).backend != "gradle":
-            return "Stale", "Export/build required; non-Gradle dependency freshness is delegated to the builder."
+        if backends.plan_for_root(gradle_root).backend == "custom":
+            return "Stale", "Export/build required; custom dependency freshness is delegated to the builder."
     return ("Fresh" if newest_project_input_mtime(project) <= apk.stat().st_mtime else "Stale"), str(apk)
 
 

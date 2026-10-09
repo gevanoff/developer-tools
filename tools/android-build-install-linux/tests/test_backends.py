@@ -130,6 +130,32 @@ Path(sys.argv[6]).write_bytes(b'godot apk')
         self.config(backend="godot", executable=exe)
         self.assertEqual(len(self.run_build()), 1)
 
+    def test_godot_freshness_ignores_cache_but_tracks_project_inputs(self):
+        self.godot()
+        apk = self.root / "build/android/app-debug.apk"
+        apk.parent.mkdir(parents=True)
+        apk.write_bytes(b"apk")
+        stamp = max(path.stat().st_mtime for path in self.root.iterdir()) + 10
+        os.utime(apk, (stamp, stamp))
+        status = lambda: core.build_status(str(self.root), self.root, core.Preferences())[0]
+        self.assertEqual(status(), "Fresh")
+        for cache in (".godot", ".import"):
+            path = self.root / cache / "cache.txt"
+            path.parent.mkdir()
+            path.write_text("generated")
+            os.utime(path, (stamp + 10, stamp + 10))
+        self.assertEqual(status(), "Fresh")
+        for name in ("project.godot", "export_presets.cfg", "lesson.gd", "words.json", "texture.png"):
+            path = self.root / name
+            if not path.exists():
+                path.write_text("input")
+            os.utime(path, (stamp + 1, stamp + 1))
+            self.assertEqual(status(), "Stale", name)
+            os.utime(path, (stamp - 1, stamp - 1))
+        self.assertEqual(status(), "Fresh")
+        apk.unlink()
+        self.assertEqual(status(), "No APK")
+
     def test_godot4_precedes_generic_godot_on_path(self):
         self.godot()
         plan = backends.select_plan(str(self.root))

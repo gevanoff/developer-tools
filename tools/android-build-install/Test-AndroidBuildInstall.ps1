@@ -22,8 +22,8 @@ $scanner = Join-Path $toolRoot 'Scan-AndroidDevice.ps1'
 $fileHashHelper = Join-Path $toolRoot 'AndroidFileHash.ps1'
 $shortcutInstaller = Join-Path $toolRoot 'Install-AndroidBuildInstallShortcut.ps1'
 $taskbarIdentityHelper = Join-Path $toolRoot 'WindowsTaskbarIdentity.ps1'
-$iconPng = Join-Path $toolRoot 'assets\android-build-install-icon.png'
-$iconPath = Join-Path $toolRoot 'assets\android-build-install.ico'
+$iconPng = Join-Path $toolRoot 'assets\droidrun-icon.png'
+$iconPath = Join-Path $toolRoot 'assets\droidrun.ico'
 $tempBase = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
 $testRoot = Join-Path $tempBase ("WindowsTools Android Test {0}" -f [Guid]::NewGuid().ToString('N'))
 $previousLocalAppData = $env:LOCALAPPDATA
@@ -88,7 +88,7 @@ try {
     (Get-Item -LiteralPath $sourcePath).LastWriteTimeUtc = [DateTime]::UtcNow
     $env:LOCALAPPDATA = Join-Path $testRoot 'state with spaces'
 
-    $testShortcut = Join-Path $testRoot 'Start Menu\Android Build and Install.lnk'
+    $testShortcut = Join-Path $testRoot 'Start Menu\DroidRun.lnk'
     $shortcutOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $shortcutInstaller `
         -ShortcutPath $testShortcut `
         -Quiet 2>&1)
@@ -96,14 +96,14 @@ try {
     Assert-True -Condition ($shortcutExit -eq 0) -Message "Start menu shortcut creation failed with exit code $shortcutExit.`n$($shortcutOutput -join [Environment]::NewLine)"
     Assert-True -Condition (Test-Path -LiteralPath $testShortcut -PathType Leaf) -Message 'The Start menu shortcut was not created.'
     . $taskbarIdentityHelper
-    Assert-True -Condition ([WindowsTools.TaskbarIdentity]::GetShortcutAppId($testShortcut) -eq (Get-AndroidBuildInstallAppId)) -Message 'The shortcut does not have the Android Build and Install AppUserModelID.'
+    Assert-True -Condition ([WindowsTools.TaskbarIdentity]::GetShortcutAppId($testShortcut) -eq (Get-AndroidBuildInstallAppId)) -Message 'The shortcut does not have the DroidRun AppUserModelID.'
     $shortcutShell = New-Object -ComObject WScript.Shell
     $loadedShortcut = $null
     try {
         $loadedShortcut = $shortcutShell.CreateShortcut($testShortcut)
         Assert-True -Condition ($loadedShortcut.TargetPath -ieq (Join-Path $PSHOME 'powershell.exe')) -Message "The shortcut target is incorrect: $($loadedShortcut.TargetPath)"
         Assert-True -Condition ($loadedShortcut.Arguments.Contains('AndroidBuildInstall-Session.ps1')) -Message "The shortcut arguments are incorrect: $($loadedShortcut.Arguments)"
-        Assert-True -Condition ($loadedShortcut.IconLocation.Contains('android-build-install.ico')) -Message "The shortcut icon is incorrect: $($loadedShortcut.IconLocation)"
+        Assert-True -Condition ($loadedShortcut.IconLocation.Contains('droidrun.ico')) -Message "The shortcut icon is incorrect: $($loadedShortcut.IconLocation)"
     }
     finally {
         if ($null -ne $loadedShortcut) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($loadedShortcut) }

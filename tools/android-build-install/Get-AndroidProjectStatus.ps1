@@ -176,7 +176,7 @@ function Resolve-LocalApk {
 function Get-NewestProjectInput {
     param([Parameter(Mandatory = $true)][string]$ProjectRoot)
 
-    $skipNames = @('.git', '.gradle', '.idea', '.vscode', 'build', 'node_modules', 'out')
+    $skipNames = @('.git', '.gradle', '.godot', '.import', '.idea', '.vscode', 'build', 'node_modules', 'out')
     $queue = New-Object System.Collections.Queue
     $queue.Enqueue($ProjectRoot)
     $newest = $null
@@ -185,7 +185,7 @@ function Get-NewestProjectInput {
         $directory = $queue.Dequeue()
         foreach ($child in Get-ChildItem -LiteralPath $directory -Force -ErrorAction SilentlyContinue) {
             if ($child.PSIsContainer) {
-                if ($skipNames -notcontains $child.Name) { $queue.Enqueue($child.FullName) }
+                if ($skipNames -notcontains $child.Name -and -not ($child.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $queue.Enqueue($child.FullName) }
                 continue
             }
 
@@ -313,7 +313,7 @@ foreach ($projectItem in @($Project)) {
             if ($null -eq $local.Apk) {
                 $buildStatus = [pscustomobject]@{ Status = $local.Status; Detail = $local.Detail; Apk = $null }
             }
-            elseif ((Get-AndroidBuildPlan -Root $gradleRoots[0]).Backend -ne 'gradle') {
+            elseif ((Get-AndroidBuildPlan -Root $gradleRoots[0]).Backend -eq 'custom') {
                 $buildStatus = [pscustomobject]@{
                     Status = 'Stale'; Detail = 'Export/build required; dependency freshness is delegated to the builder.'; Apk = $local.Apk
                 }

@@ -6,7 +6,7 @@ import traceback
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox,
@@ -152,7 +152,8 @@ class MainWindow(QMainWindow):
     def __init__(self, initial_project: str | None = None):
         super().__init__()
         self.initial_project = initial_project
-        self.setWindowTitle("Android Build and Install — Linux")
+        self.setWindowTitle("DroidRun — Linux")
+        self.setWindowIcon(QIcon(str(Path(__file__).resolve().parents[2] / "android-build-install" / "assets" / "droidrun-icon.png")))
         self.resize(1120, 720)
         self.pool = QThreadPool.globalInstance()
         self.busy = False

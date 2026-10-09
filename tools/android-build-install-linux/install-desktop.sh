@@ -10,7 +10,8 @@ ln -sfn "$ROOT/android-build-install" "$BIN_DIR/android-build-install"
 cat > "$APP_DIR/android-build-install.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=Android Build and Install
+Name=DroidRun
+Icon=$ROOT/../android-build-install/assets/droidrun-icon.png
 Comment=Build, sync, install, and launch Android projects
 Exec="$BIN_DIR/android-build-install" %f
 Terminal=false

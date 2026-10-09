@@ -42,7 +42,7 @@ if ($SuppressSuccessDialog) { $implementationParameters.SuppressSuccessDialog = 
 if ($NoUi) { $implementationParameters.NoUi = $true }
 
 @(
-    'Android Build and Install',
+    'DroidRun',
     "Started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz')",
     "Computer: $env:COMPUTERNAME",
     "User: $env:USERNAME",
@@ -102,7 +102,7 @@ The log will now open in Notepad so the actual builder or adb error can be copie
 
     [System.Windows.Forms.MessageBox]::Show(
         $message,
-        'Android Build and Install',
+        'DroidRun',
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Error
     ) | Out-Null

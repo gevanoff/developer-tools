@@ -14,7 +14,7 @@ Add-Type -AssemblyName System.Drawing
 try { [WindowsTools.TaskbarIdentity]::SetCurrentProcessAppId((Get-AndroidBuildInstallAppId)) }
 catch { Write-Verbose "Could not set the settings-window taskbar identity: $($_.Exception.Message)" }
 
-$appIconPath = Join-Path $PSScriptRoot 'assets\android-build-install.ico'
+$appIconPath = Join-Path $PSScriptRoot 'assets\droidrun.ico'
 $appIcon = $null
 if (Test-Path -LiteralPath $appIconPath -PathType Leaf) {
     try { $appIcon = New-Object System.Drawing.Icon($appIconPath) } catch { $appIcon = $null }

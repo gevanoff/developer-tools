@@ -24,7 +24,7 @@ function Show-Error {
     if ($NoUi) { return }
     [System.Windows.Forms.MessageBox]::Show(
         $Message,
-        'Android Build and Install',
+        'DroidRun',
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Error
     ) | Out-Null
@@ -38,7 +38,7 @@ function Show-Info {
     }
     [System.Windows.Forms.MessageBox]::Show(
         $Message,
-        'Android Build and Install',
+        'DroidRun',
         [System.Windows.Forms.MessageBoxButtons]::OK,
         [System.Windows.Forms.MessageBoxIcon]::Information
     ) | Out-Null
@@ -442,7 +442,7 @@ try {
     }
 
     Write-Host ''
-    Write-Host 'Android Build and Install'
+    Write-Host 'DroidRun'
     Write-Host '========================='
     Write-Host ''
     Write-Host "Selected folder: $Project"

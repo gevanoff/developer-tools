@@ -115,9 +115,12 @@ wrapper before executing them.
   unchanged APK must explicitly update its output timestamp after validation.
 - Nonzero build exits, missing/empty/unchanged outputs, and cancellation stop
   before installation. The helper does not delete old APKs on failure.
-- Sync & Run always invokes Godot/custom builders. Their output appears as
-  **Stale** with a detail explaining that dependency freshness is delegated to
-  the builder; the helper cannot infer arbitrary framework dependencies from
-  Gradle's timestamp rules. APK hash comparison still skips identical installs.
+- Godot exports use the project-file timestamp freshness check, excluding
+  generated `.godot/`, `.import/`, and build/cache directories. Newer scripts,
+  assets, presets, or build configuration mark the APK **Stale**; a successful
+  export marks it **Fresh**. This checks local inputs, not SDK/export-template
+  or external dependency changes; use **Build & Install** after changing those.
+- Sync & Run always invokes custom builders because their external dependencies
+  cannot be inferred. APK hash comparison still skips identical installs.
 - Git remains fast-forward-only. Device preferences, logs, cancellation,
   package inspection, launch, and the no-automatic-uninstall policy still apply.
