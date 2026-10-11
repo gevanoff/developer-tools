@@ -137,6 +137,9 @@ function Fit-Compact {
  $bar.SetBounds(12,62,$leftWidth,6)
  $form.ClientSize=New-Object Drawing.Size(($rightX+$rightWidth+12),([Math]::Max(80,$y+9)))
  $accent.Width=$form.ClientSize.Width
+ # Refreshes can grow the measured window after its original positioning.
+ $screen=[Windows.Forms.Screen]::FromControl($form).WorkingArea
+ $form.Location=New-Object Drawing.Point(([Math]::Max($screen.Left,[Math]::Min($form.Left,$screen.Right-$form.Width))),([Math]::Max($screen.Top,[Math]::Min($form.Top,$screen.Bottom-$form.Height))))
 }
 foreach($name in @('Mini','Compact','Standard','Large')){
  $item=$sizeMenu.DropDownItems.Add($name)

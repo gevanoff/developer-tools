@@ -208,6 +208,10 @@ try {
   foreach($preset in @('Mini','Compact','Standard','Large')){
    Set-Layout $preset
    if($preset -eq 'Compact'){
+    $screen=[Windows.Forms.Screen]::FromControl($form).WorkingArea
+    $form.Location=New-Object Drawing.Point(($screen.Right-$form.Width+5),($screen.Bottom-$form.Height+5))
+    Fit-Compact
+    if($form.Right -gt $screen.Right -or $form.Bottom -gt $screen.Bottom){throw 'Compact escaped screen after resize'}
     if($big.Right+20 -gt $resets.Left -or $status.Left -ne $resets.Left){throw 'Compact columns overlap'}
     foreach($label in @($resets,$windows,$status)){
      foreach($line in ($label.Text -split "`n")){
