@@ -1,4 +1,4 @@
-param([switch]$SelfTest,[switch]$LiveTest,[string]$CodexPath,[string]$PreviewPath)
+param([switch]$SelfTest,[switch]$LiveTest,[string]$CodexPath,[string]$PreviewPath,[ValidateSet('Mini','Compact','Standard','Large')][string]$Layout='Standard')
 $ErrorActionPreference = 'Stop'
 $taskkillPath = Join-Path ([Environment]::SystemDirectory) 'taskkill.exe'
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
@@ -178,7 +178,7 @@ $timer.Add_Tick({
  }
 })
 . (Join-Path $PSScriptRoot 'Presentation.ps1')
-Set-Layout 'Standard'
+Set-Layout $Layout
 try {
  if($SelfTest){
   $script:snapshot=[pscustomobject]@{checkedAt=[DateTime]::UtcNow.ToString('o');availableResets=2;ordinaryUsageAllowed=$true;rateLimits=[pscustomobject]@{primary=[pscustomobject]@{usedPercent=27;windowDurationMins=10080;resetsAt=[DateTimeOffset]::UtcNow.AddDays(3).ToUnixTimeSeconds()};secondary=$null}}
