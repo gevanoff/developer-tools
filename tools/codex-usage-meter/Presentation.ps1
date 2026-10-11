@@ -65,6 +65,7 @@ function Set-Layout($name) {
  $script:layoutName=$name
  $form.SuspendLayout()
  $title.Text='CODEX ALLOWANCE  /  right-click for size'
+ $title.Visible=$name -ne 'Compact'
  foreach($button in @($refresh,$collapse,$dashboard)){$button.Visible=$name -in @('Standard','Large')}
  switch($name){
   'Mini' {
@@ -78,13 +79,12 @@ function Set-Layout($name) {
    Place-Control $status 12 168 216 34 8
   }
   'Compact' {
-   $w=490;$h=138
-   Place-Control $title 14 10 462 18 8
-   Place-Control $big 14 33 172 45 26
-   Place-Control $bar 14 86 164 7 0
-   Place-Control $resets 200 34 276 25 11
-   Place-Control $windows 200 66 276 42 9
-   Place-Control $status 14 112 462 23 8
+   $w=400;$h=100
+   Place-Control $big 12 12 180 44 26
+   Place-Control $bar 12 62 180 6 0
+   Place-Control $resets 214 12 174 18 9
+   Place-Control $windows 214 31 174 18 9
+   Place-Control $status 214 50 174 34 8
   }
   'Large' {
    $w=430;$h=420
@@ -115,6 +115,28 @@ function Set-Layout($name) {
  $form.ResumeLayout()
  Render
  Sync-TitleTheme
+}
+function Fit-Compact {
+ if($script:layoutName -ne 'Compact'){return}
+ # Measure the actual strings with the same Windows text renderer as the labels.
+ $leftWidth=[Windows.Forms.TextRenderer]::MeasureText($big.Text,$big.Font).Width+4
+ $rightWidth=0
+ foreach($label in @($resets,$windows,$status)){
+  foreach($line in ($label.Text -split "`n")){
+   $rightWidth=[Math]::Max($rightWidth,([Windows.Forms.TextRenderer]::MeasureText($line,$label.Font).Width+4))
+  }
+ }
+ $rightX=12+$leftWidth+22
+ $y=12
+ foreach($label in @($resets,$windows,$status)){
+  $height=[Windows.Forms.TextRenderer]::MeasureText($label.Text,$label.Font).Height+2
+  $label.SetBounds($rightX,$y,$rightWidth,$height)
+  $y+=$height+1
+ }
+ $big.SetBounds(12,12,$leftWidth,44)
+ $bar.SetBounds(12,62,$leftWidth,6)
+ $form.ClientSize=New-Object Drawing.Size(($rightX+$rightWidth+12),([Math]::Max(80,$y+9)))
+ $accent.Width=$form.ClientSize.Width
 }
 foreach($name in @('Mini','Compact','Standard','Large')){
  $item=$sizeMenu.DropDownItems.Add($name)

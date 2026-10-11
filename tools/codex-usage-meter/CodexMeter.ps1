@@ -118,6 +118,7 @@ function Render {
  if(!$script:snapshot){
   Set-MeterColor $null $true
   if($script:lastError){$big.Text='Unavailable';$status.Text=$script:lastError;$tray.Text='Codex allowance - unavailable'}
+  Fit-Compact
   return
  }
  $r=$script:snapshot.rateLimits
@@ -132,18 +133,19 @@ function Render {
  $resets.Text="Available resets: $count"
  $last=([DateTimeOffset]::Parse($script:snapshot.checkedAt)).ToLocalTime().ToString('h:mm:ss tt')
  $stale=([DateTimeOffset]::UtcNow-[DateTimeOffset]::Parse($script:snapshot.checkedAt)).TotalMinutes -gt 6
- Set-MeterColor $left ([bool]($script:lastError -or $stale)) ($script:snapshot.ordinaryUsageAllowed -eq $false)
  $status.Text=if($script:lastError -or $stale){"Stale - last success $last`nRefresh will retry automatically."}elseif($script:snapshot.ordinaryUsageAllowed -eq $false){"Included usage blocked. Updated $last"}else{"Updated $last  |  Refreshes every 5 min"}
  if($script:layoutName -in @('Mini','Compact')){
   if($null -ne $left){$big.Text=('{0:0.#}% left' -f $left)}
   $resets.Text="Resets available: $count"
   $stamp=([DateTimeOffset]::Parse($script:snapshot.checkedAt)).ToLocalTime().ToString('HH:mm:ss')
   $state=if($script:lastError -or $stale){'STALE; retrying'}elseif($script:snapshot.ordinaryUsageAllowed -eq $false){'Usage blocked'}else{'Auto refresh: 5 min'}
-  $separator=if($script:layoutName -eq 'Mini'){"`n"}else{'  |  '}
+  $separator="`n"
   $status.Text="Updated $stamp$separator$state"
  }
  $tip=if($script:lastError -or $stale){'Codex: stale - open panel'}else{("Codex: {0} | Resets: {1}" -f $big.Text,$count)}
  $tray.Text=$tip.Substring(0,[Math]::Min(63,$tip.Length))
+ Fit-Compact
+ Set-MeterColor $left ([bool]($script:lastError -or $stale)) ($script:snapshot.ordinaryUsageAllowed -eq $false)
 }
 $refresh.Add_Click({$script:nextRefresh=[DateTime]::MinValue})
 $trayRefresh.Add_Click({$script:nextRefresh=[DateTime]::MinValue})
@@ -205,6 +207,14 @@ try {
   $script:snapshot.ordinaryUsageAllowed=$true
   foreach($preset in @('Mini','Compact','Standard','Large')){
    Set-Layout $preset
+   if($preset -eq 'Compact'){
+    if($big.Right+20 -gt $resets.Left -or $status.Left -ne $resets.Left){throw 'Compact columns overlap'}
+    foreach($label in @($resets,$windows,$status)){
+     foreach($line in ($label.Text -split "`n")){
+      if([Windows.Forms.TextRenderer]::MeasureText($line,$label.Font).Width -gt $label.Width){throw 'Compact text would wrap'}
+     }
+    }
+   }
    foreach($control in @($big,$bar,$windows,$resets,$status)){
     if($control.Right -gt $form.ClientSize.Width -or $control.Bottom -gt $form.ClientSize.Height){throw "Clipped control in $preset"}
    }
