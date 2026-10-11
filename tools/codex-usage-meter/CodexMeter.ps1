@@ -1,8 +1,9 @@
-param([switch]$SelfTest,[switch]$LiveTest,[string]$CodexPath,[string]$PreviewPath)
+param([switch]$SelfTest,[switch]$LiveTest,[string]$CodexPath,[string]$PreviewPath,[ValidateSet('Mini','Compact','Standard','Large')][string]$Layout='Standard')
 $ErrorActionPreference = 'Stop'
 $taskkillPath = Join-Path ([Environment]::SystemDirectory) 'taskkill.exe'
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
+if($SelfTest){[Windows.Forms.Application]::SetUnhandledExceptionMode('ThrowException')}
 $mutexName = if($LiveTest){'Local\CodexUsageMeter_Test'}else{'Local\CodexUsageMeter_v1'}
 $mutex = New-Object Threading.Mutex($false, $mutexName)
 if (!$SelfTest) {
@@ -45,7 +46,7 @@ function Label($text,$x,$y,$w,$h,$size=10) {
 }
 $title=Label 'CODEX ALLOWANCE' 20 16 270 24 10
 $big=Label 'Connecting...' 18 44 294 49 27
-$bar=New-Object Windows.Forms.ProgressBar
+$bar=New-Object Windows.Forms.Panel
 $bar.Location=New-Object Drawing.Point(22,100); $bar.Size=New-Object Drawing.Size(286,8)
 $form.Controls.Add($bar)
 $windows=Label '' 20 119 290 82 10
@@ -107,11 +108,17 @@ function Window-Text($w) {
   $d=[DateTimeOffset]::FromUnixTimeSeconds([long]$w.resetsAt)-[DateTimeOffset]::UtcNow
   $count=if($d.TotalSeconds -le 0){'reset due; awaiting refresh'}else{('resets in {0}d {1}h {2}m' -f $d.Days,$d.Hours,$d.Minutes)}
  }
+ if($script:layoutName -in @('Mini','Compact')){
+  $short=if($null -eq $w.resetsAt){'reset unknown'}elseif($d.TotalSeconds -le 0){'reset pending'}else{('{0}d {1}h {2}m' -f $d.Days,$d.Hours,$d.Minutes)}
+  return "$name $remaining% / $short"
+ }
  return "$name`: $remaining% left`n$count"
 }
 function Render {
  if(!$script:snapshot){
+  Set-MeterColor $null $true
   if($script:lastError){$big.Text='Unavailable';$status.Text=$script:lastError;$tray.Text='Codex allowance - unavailable'}
+  Fit-Compact
   return
  }
  $r=$script:snapshot.rateLimits
@@ -119,22 +126,33 @@ function Render {
  $valid=@($ws | Where-Object {$null -ne $_.usedPercent})
  if($valid.Count){
   $left=($valid | ForEach-Object {[Math]::Max(0,[Math]::Min(100,100-$_.usedPercent))} | Measure-Object -Minimum).Minimum
-  $big.Text=('{0:0.#}% remaining' -f $left); $bar.Value=[int]$left
- }else{$big.Text='Not reported';$bar.Value=0}
+  $big.Text=('{0:0.#}% remaining' -f $left)
+ }else{$big.Text='Not reported';$left=$null}
  $windows.Text=($ws | ForEach-Object {Window-Text $_}) -join "`n"
  $count=if($null -eq $script:snapshot.availableResets){'Not reported'}else{[string]$script:snapshot.availableResets}
  $resets.Text="Available resets: $count"
  $last=([DateTimeOffset]::Parse($script:snapshot.checkedAt)).ToLocalTime().ToString('h:mm:ss tt')
  $stale=([DateTimeOffset]::UtcNow-[DateTimeOffset]::Parse($script:snapshot.checkedAt)).TotalMinutes -gt 6
  $status.Text=if($script:lastError -or $stale){"Stale - last success $last`nRefresh will retry automatically."}elseif($script:snapshot.ordinaryUsageAllowed -eq $false){"Included usage blocked. Updated $last"}else{"Updated $last  |  Refreshes every 5 min"}
+ if($script:layoutName -in @('Mini','Compact')){
+  if($null -ne $left){$big.Text=('{0:0.#}% left' -f $left)}
+  $resets.Text="Resets available: $count"
+  $stamp=([DateTimeOffset]::Parse($script:snapshot.checkedAt)).ToLocalTime().ToString('HH:mm:ss')
+  $state=if($script:lastError -or $stale){'STALE; retrying'}elseif($script:snapshot.ordinaryUsageAllowed -eq $false){'Usage blocked'}else{'Auto refresh: 5 min'}
+  $separator="`n"
+  $status.Text="Updated $stamp$separator$state"
+ }
  $tip=if($script:lastError -or $stale){'Codex: stale - open panel'}else{("Codex: {0} | Resets: {1}" -f $big.Text,$count)}
  $tray.Text=$tip.Substring(0,[Math]::Min(63,$tip.Length))
+ Fit-Compact
+ Set-MeterColor $left ([bool]($script:lastError -or $stale)) ($script:snapshot.ordinaryUsageAllowed -eq $false)
 }
 $refresh.Add_Click({$script:nextRefresh=[DateTime]::MinValue})
 $trayRefresh.Add_Click({$script:nextRefresh=[DateTime]::MinValue})
 $timer=New-Object Windows.Forms.Timer
 $timer.Interval=1000
 $timer.Add_Tick({
+ Sync-TitleTheme
  if($script:worker -and $script:worker.HasExited -and $script:outTask.IsCompleted -and $script:errTask.IsCompleted){
   try{
    $data=$script:outTask.Result | ConvertFrom-Json
@@ -159,6 +177,8 @@ $timer.Add_Tick({
   $script:quitting=$true;$form.Close()
  }
 })
+. (Join-Path $PSScriptRoot 'Presentation.ps1')
+Set-Layout $Layout
 try {
  if($SelfTest){
   $script:snapshot=[pscustomobject]@{checkedAt=[DateTime]::UtcNow.ToString('o');availableResets=2;ordinaryUsageAllowed=$true;rateLimits=[pscustomobject]@{primary=[pscustomobject]@{usedPercent=27;windowDurationMins=10080;resetsAt=[DateTimeOffset]::UtcNow.AddDays(3).ToUnixTimeSeconds()};secondary=$null}}
@@ -180,6 +200,35 @@ try {
   if($windows.Text -notlike '*awaiting refresh*'){throw 'Expired reset failed'}
   $script:snapshot.ordinaryUsageAllowed=$false;Render
   if($status.Text -notlike '*blocked*'){throw 'Blocked usage failed'}
+  foreach($pair in @(@(100,'#4ADE80'),@(50,'#FACC15'),@(25,'#FB923C'),@(10,'#F87171'),@(0,'#F87171'))){
+   if((Get-MeterColor $pair[0]).ToArgb() -ne ([Drawing.ColorTranslator]::FromHtml($pair[1])).ToArgb()){throw 'Color boundary failed'}
+  }
+  if((Get-MeterColor 90 $true).ToArgb() -ne ([Drawing.ColorTranslator]::FromHtml('#94A3B8')).ToArgb()){throw 'Stale color failed'}
+  $script:snapshot.ordinaryUsageAllowed=$true
+  foreach($preset in @('Mini','Compact','Standard','Large')){
+   Set-Layout $preset
+   if($preset -eq 'Compact'){
+    $screen=[Windows.Forms.Screen]::FromControl($form).WorkingArea
+    $form.Location=New-Object Drawing.Point(($screen.Right-$form.Width+5),($screen.Bottom-$form.Height+5))
+    Fit-Compact
+    if($form.Right -gt $screen.Right -or $form.Bottom -gt $screen.Bottom){throw 'Compact escaped screen after resize'}
+    if($big.Right+20 -gt $resets.Left -or $status.Left -ne $resets.Left){throw 'Compact columns overlap'}
+    foreach($label in @($resets,$windows,$status)){
+     foreach($line in ($label.Text -split "`n")){
+      if([Windows.Forms.TextRenderer]::MeasureText($line,$label.Font).Width -gt $label.Width){throw 'Compact text would wrap'}
+     }
+    }
+   }
+   foreach($control in @($big,$bar,$windows,$resets,$status)){
+    if($control.Right -gt $form.ClientSize.Width -or $control.Bottom -gt $form.ClientSize.Height){throw "Clipped control in $preset"}
+   }
+   if($accent.BackColor.ToArgb() -ne $fill.BackColor.ToArgb() -or $null -eq $tray.Icon){throw 'Color synchronization failed'}
+   if($PreviewPath){
+    $preview=New-Object Drawing.Bitmap($form.Width,$form.Height)
+    $form.DrawToBitmap($preview,(New-Object Drawing.Rectangle(0,0,$form.Width,$form.Height)))
+    $preview.Save($PreviewPath.Replace('.png',"-$preset.png"));$preview.Dispose()
+   }
+  }
   if($PreviewPath){
    $bmp=New-Object Drawing.Bitmap($form.Width,$form.Height)
    $form.DrawToBitmap($bmp,(New-Object Drawing.Rectangle(0,0,$form.Width,$form.Height)))
@@ -191,5 +240,7 @@ try {
  $timer.Stop();$timer.Dispose();$tray.Visible=$false;$tray.Dispose()
  if($script:worker -and !$script:worker.HasExited){& $taskkillPath /PID $script:worker.Id /T /F 2>$null | Out-Null}
  $form.Dispose();if(!$SelfTest){$mutex.ReleaseMutex()};$mutex.Dispose()
+ foreach($icon in $script:meterIcons.Values){$icon.Dispose()}
+ foreach($font in $script:meterFonts.Values){$font.Dispose()}
 }
 if($script:liveFailed){exit 1}

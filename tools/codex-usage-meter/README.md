@@ -30,6 +30,10 @@ The execution-policy option applies to this process only. No administrator acces
 
 ## Controls and readings
 
+The remaining bar, top window accent, and tray icon share a status color: green above 50%, yellow above 25% through 50%, orange above 10% through 25%, and red at 10% or less. Blocked included usage is red; stale or unavailable data is gray. Percentages and status text remain visible so color is not the only signal.
+
+Right-click the panel or tray icon and select **Panel size**: **Mini** (240x205), **Compact** (automatically sized to its text), **Standard** (330x350), or **Large** (430x420), measured in client pixels before Windows scaling. Mini is a narrow card with a two-line update footer; Compact is a shallow two-column strip: percentage and bar on the left; resets, usage windows, Updated, and auto-refresh status on the right. Its width and height are measured from the displayed text to avoid wrapping and wasted space. Standard and Large retain the full vertical dashboard. Mini and Compact hide the bottom buttons; refresh, restore, and quit remain available in the context menu. The panel starts in Standard; the selection is not persisted. The colored accent is inside the window; the native title bar follows Windows light/dark app mode, including changes while the panel is open. High-contrast mode leaves title-bar styling to Windows.
+
 - Drag the title bar to move the panel.
 - **To tray** or **X** hides it; left-click the tray icon to restore it. Windows may place the icon in the hidden-icons menu.
 - Right-click the icon for **Show allowance**, **Refresh now**, **Always on top**, or **Quit**.
