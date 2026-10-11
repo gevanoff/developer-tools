@@ -1,5 +1,6 @@
 param([switch]$SelfTest,[switch]$LiveTest,[string]$CodexPath,[string]$PreviewPath)
 $ErrorActionPreference = 'Stop'
+$taskkillPath = Join-Path ([Environment]::SystemDirectory) 'taskkill.exe'
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 $mutexName = if($LiveTest){'Local\CodexUsageMeter_Test'}else{'Local\CodexUsageMeter_v1'}
@@ -134,7 +135,7 @@ $trayRefresh.Add_Click({$script:nextRefresh=[DateTime]::MinValue})
 $timer=New-Object Windows.Forms.Timer
 $timer.Interval=1000
 $timer.Add_Tick({
- if($script:worker -and $script:worker.HasExited){
+ if($script:worker -and $script:worker.HasExited -and $script:outTask.IsCompleted -and $script:errTask.IsCompleted){
   try{
    $data=$script:outTask.Result | ConvertFrom-Json
    if($data.error){throw $data.error}
@@ -145,7 +146,10 @@ $timer.Add_Tick({
   $script:nextRefresh=[DateTime]::UtcNow.AddMinutes(5)
  }
  if($script:worker -and ([DateTime]::UtcNow-$script:started).TotalSeconds -gt 35){
-  & taskkill.exe /PID $script:worker.Id /T /F 2>$null | Out-Null
+  if(!$script:worker.HasExited){& $taskkillPath /PID $script:worker.Id /T /F 2>$null | Out-Null}
+  $script:worker.Dispose();$script:worker=$null;$refresh.Enabled=$true
+  $script:lastError='Usage refresh timed out. Retry shortly.'
+  $script:nextRefresh=[DateTime]::UtcNow.AddMinutes(5)
  }
  if(!$script:worker -and [DateTime]::UtcNow -ge $script:nextRefresh){Start-Refresh}
  Render
@@ -185,7 +189,7 @@ try {
  }else{$timer.Start();[Windows.Forms.Application]::Run($form)}
 } finally {
  $timer.Stop();$timer.Dispose();$tray.Visible=$false;$tray.Dispose()
- if($script:worker -and !$script:worker.HasExited){& taskkill.exe /PID $script:worker.Id /T /F 2>$null | Out-Null}
+ if($script:worker -and !$script:worker.HasExited){& $taskkillPath /PID $script:worker.Id /T /F 2>$null | Out-Null}
  $form.Dispose();if(!$SelfTest){$mutex.ReleaseMutex()};$mutex.Dispose()
 }
 if($script:liveFailed){exit 1}

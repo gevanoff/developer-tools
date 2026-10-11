@@ -44,9 +44,9 @@ It refreshes every five minutes even while hidden. Failed updates retain the pre
 
 Refreshes initialize a local Codex app-server and call only `account/rateLimits/read`. They do not start a thread or model turn, make inference requests, purchase credits, or consume resets. There is no AI usage from the meter's polling code; it still uses ordinary network and computer resources. Building or asking an AI to operate the meter is separate from its own refreshes.
 
-The existing Codex installation manages credentials and its normal local state. This tool does not read or copy token files. It does not save usage history or account IDs and does not send data to a third-party server. The reader discards backend diagnostic text rather than writing it to logs.
+The existing Codex installation manages credentials and its normal local state. This tool does not read or copy token files. It does not save usage history or account IDs and does not send data to a third-party server. The reader discards backend diagnostic text rather than writing it to logs, allowlists the numeric window fields it returns, and rejects oversized or unsafe responses. Use trusted Node.js and Codex installations and keep their PATH entries under your control; the reader executes those local programs with your user permissions.
 
-The [Codex app-server documentation](https://learn.chatgpt.com/docs/app-server) describes the underlying interface. It may change with Codex updates. The available-reset field is verified against the installed version used for development; older versions may return “Not reported.” This is a community utility, not an official OpenAI product.
+The [Codex app-server documentation](https://learn.chatgpt.com/docs/app-server) describes the underlying interface. It may change with Codex updates. If an older app-server rejects the newer read options with an invalid-request or invalid-params error, the reader retries once with null parameters. Versions supporting the read method can still show allowance while missing reset details appear as “Not reported.” Versions without that method report usage as unavailable. This is a community utility, not an official OpenAI product.
 
 ## Validation
 
@@ -57,7 +57,7 @@ node --test tests/read-usage.test.mjs
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\CodexMeter.ps1 -SelfTest
 ```
 
-Tests exercise the real stdio transport with a fake child process, paths containing spaces, missing executable, timeouts, early exit, malformed/error responses, account-data filtering, multiple windows, unknown values, stale/blocked status, expired countdowns, and collapse/restore. The Windows CI workflow runs these tests.
+Tests exercise the real stdio transport with a fake child process, paths containing spaces, missing executable, timeouts, early exit, malformed/error responses, legacy-option fallback, bounded output, numeric validation, nested account-data filtering, multiple windows, unknown values, stale/blocked status, expired countdowns, and collapse/restore. The Windows CI workflow runs these tests.
 
 Optional authenticated check (one read; opens and then closes the test panel):
 
