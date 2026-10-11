@@ -8,6 +8,7 @@ The repository is organized as a collection rather than around a single applicat
 
 | Tool | Platform | Purpose |
 | --- | --- | --- |
+| [Codex Usage Meter](tools/codex-usage-meter/) | Windows | Floating Codex allowance panel with tray collapse, reset countdowns, and available resets; refreshes without model calls. |
 | [DroidRun](tools/android-build-install/) | Windows | Build, synchronize, install, compare, and launch Android development APKs from a Windows dashboard. |
 | [DroidRun for Linux](tools/android-build-install-linux/) | Linux / Ubuntu | Linux counterpart to DroidRun, using XDG paths and native Linux tooling conventions. |
 | `google-drive-zip-merger` | Windows | Merge the multiple ZIP archives produced by large Google Drive folder downloads into one destination tree. |
