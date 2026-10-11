@@ -4,6 +4,7 @@ using System;
 using System.Runtime.InteropServices;
 public static class MeterNative {
  [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr handle);
+ [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 }
 "@
 $script:layoutName='Standard'
@@ -50,33 +51,70 @@ function Place-Control($control,$x,$y,$w,$h,$fontSize) {
  $control.SetBounds($x,$y,$w,$h)
  if($fontSize){if(!$script:meterFonts.ContainsKey($fontSize)){$script:meterFonts[$fontSize]=New-Object Drawing.Font('Segoe UI',$fontSize)};$control.Font=$script:meterFonts[$fontSize]}
 }
+function Sync-TitleTheme {
+ # Poll from the UI timer so registry access and DWM calls stay on the UI thread.
+ $light=Get-ItemPropertyValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name AppsUseLightTheme -ErrorAction SilentlyContinue
+ $dark=if([Windows.Forms.SystemInformation]::HighContrast -or $null -eq $light){0}else{[int]($light -eq 0)}
+ if($script:lastTitleDark -ne $dark){
+  $result=[MeterNative]::DwmSetWindowAttribute($form.Handle,20,[ref]$dark,4)
+  if($result -ne 0){[void][MeterNative]::DwmSetWindowAttribute($form.Handle,19,[ref]$dark,4)}
+  $script:lastTitleDark=$dark
+ }
+}
 function Set-Layout($name) {
  $script:layoutName=$name
  $form.SuspendLayout()
+ $title.Text='CODEX ALLOWANCE  /  right-click for size'
+ foreach($button in @($refresh,$collapse,$dashboard)){$button.Visible=$name -in @('Standard','Large')}
  switch($name){
-  'Mini' {$w=300;$h=225;$headline=20;$top=30;$barY=72;$detailsY=86;$detailsH=58;$resetY=150;$statusY=175;$buttonsY=0;$detailFont=8;$resetFont=10;$statusFont=8}
-  'Compact' {$w=310;$h=285;$headline=23;$top=32;$barY=80;$detailsY=94;$detailsH=62;$resetY=160;$statusY=191;$buttonsY=241;$detailFont=9;$resetFont=11;$statusFont=8}
-  'Large' {$w=430;$h=420;$headline=34;$top=46;$barY=113;$detailsY=135;$detailsH=95;$resetY=239;$statusY=283;$buttonsY=366;$detailFont=13;$resetFont=16;$statusFont=11}
-  default {$w=330;$h=350;$headline=27;$top=44;$barY=100;$detailsY=119;$detailsH=82;$resetY=208;$statusY=242;$buttonsY=300;$detailFont=10;$resetFont=12;$statusFont=9}
+  'Mini' {
+   $w=240;$h=205
+   Place-Control $title 12 10 216 18 8
+   $title.Text='CODEX / right-click for options'
+   Place-Control $big 12 30 216 40 22
+   Place-Control $bar 12 76 216 6 0
+   Place-Control $resets 12 90 216 23 10
+   Place-Control $windows 12 118 216 42 9
+   Place-Control $status 12 168 216 34 8
+  }
+  'Compact' {
+   $w=490;$h=138
+   Place-Control $title 14 10 462 18 8
+   Place-Control $big 14 33 172 45 26
+   Place-Control $bar 14 86 164 7 0
+   Place-Control $resets 200 34 276 25 11
+   Place-Control $windows 200 66 276 42 9
+   Place-Control $status 14 112 462 23 8
+  }
+  'Large' {
+   $w=430;$h=420
+   Place-Control $title 18 14 394 22 10
+   Place-Control $big 18 48 394 60 34
+   Place-Control $bar 18 116 394 9 0
+   Place-Control $windows 18 141 394 95 13
+   Place-Control $resets 18 240 394 34 16
+   Place-Control $status 18 287 394 55 11
+  }
+  default {
+   $w=330;$h=350
+   Place-Control $title 16 12 298 20 8
+   Place-Control $big 16 44 298 53 27
+   Place-Control $bar 18 100 294 7 0
+   Place-Control $windows 18 119 294 82 10
+   Place-Control $resets 18 208 294 32 12
+   Place-Control $status 18 242 294 48 9
+  }
  }
  $form.ClientSize=New-Object Drawing.Size($w,$h)
  Place-Control $accent 0 0 $w 5 0
- Place-Control $title 16 12 ($w-32) 20 8
- Place-Control $big 16 $top ($w-32) ($barY-$top-3) $headline
- Place-Control $bar 18 $barY ($w-36) 7 0
- Place-Control $windows 18 $detailsY ($w-36) $detailsH $detailFont
- Place-Control $resets 18 $resetY ($w-36) 32 $resetFont
- Place-Control $status 18 $statusY ($w-36) 48 $statusFont
  $buttons=@($refresh,$collapse,$dashboard)
- for($i=0;$i -lt 3;$i++){
-  $buttons[$i].Visible=$name -ne 'Mini'
-  Place-Control $buttons[$i] (18+$i*[int](($w-30)/3)) $buttonsY ([int](($w-48)/3)) 32 9
- }
+ for($i=0;$i -lt 3;$i++){Place-Control $buttons[$i] (18+$i*[int](($w-30)/3)) ($h-50) ([int](($w-48)/3)) 32 9}
  foreach($item in $sizeMenu.DropDownItems){$item.Checked=$item.Text -eq $name}
  $screen=[Windows.Forms.Screen]::FromControl($form).WorkingArea
  $form.Location=New-Object Drawing.Point(([Math]::Max($screen.Left,[Math]::Min($form.Left,$screen.Right-$form.Width))),([Math]::Max($screen.Top,[Math]::Min($form.Top,$screen.Bottom-$form.Height))))
  $form.ResumeLayout()
  Render
+ Sync-TitleTheme
 }
 foreach($name in @('Mini','Compact','Standard','Large')){
  $item=$sizeMenu.DropDownItems.Add($name)

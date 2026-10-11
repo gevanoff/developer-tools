@@ -108,6 +108,10 @@ function Window-Text($w) {
   $d=[DateTimeOffset]::FromUnixTimeSeconds([long]$w.resetsAt)-[DateTimeOffset]::UtcNow
   $count=if($d.TotalSeconds -le 0){'reset due; awaiting refresh'}else{('resets in {0}d {1}h {2}m' -f $d.Days,$d.Hours,$d.Minutes)}
  }
+ if($script:layoutName -in @('Mini','Compact')){
+  $short=if($null -eq $w.resetsAt){'reset unknown'}elseif($d.TotalSeconds -le 0){'reset pending'}else{('{0}d {1}h {2}m' -f $d.Days,$d.Hours,$d.Minutes)}
+  return "$name $remaining% / $short"
+ }
  return "$name`: $remaining% left`n$count"
 }
 function Render {
@@ -130,6 +134,14 @@ function Render {
  $stale=([DateTimeOffset]::UtcNow-[DateTimeOffset]::Parse($script:snapshot.checkedAt)).TotalMinutes -gt 6
  Set-MeterColor $left ([bool]($script:lastError -or $stale)) ($script:snapshot.ordinaryUsageAllowed -eq $false)
  $status.Text=if($script:lastError -or $stale){"Stale - last success $last`nRefresh will retry automatically."}elseif($script:snapshot.ordinaryUsageAllowed -eq $false){"Included usage blocked. Updated $last"}else{"Updated $last  |  Refreshes every 5 min"}
+ if($script:layoutName -in @('Mini','Compact')){
+  if($null -ne $left){$big.Text=('{0:0.#}% left' -f $left)}
+  $resets.Text="Resets available: $count"
+  $stamp=([DateTimeOffset]::Parse($script:snapshot.checkedAt)).ToLocalTime().ToString('HH:mm:ss')
+  $state=if($script:lastError -or $stale){'STALE; retrying'}elseif($script:snapshot.ordinaryUsageAllowed -eq $false){'Usage blocked'}else{'Auto refresh: 5 min'}
+  $separator=if($script:layoutName -eq 'Mini'){"`n"}else{'  |  '}
+  $status.Text="Updated $stamp$separator$state"
+ }
  $tip=if($script:lastError -or $stale){'Codex: stale - open panel'}else{("Codex: {0} | Resets: {1}" -f $big.Text,$count)}
  $tray.Text=$tip.Substring(0,[Math]::Min(63,$tip.Length))
 }
@@ -138,6 +150,7 @@ $trayRefresh.Add_Click({$script:nextRefresh=[DateTime]::MinValue})
 $timer=New-Object Windows.Forms.Timer
 $timer.Interval=1000
 $timer.Add_Tick({
+ Sync-TitleTheme
  if($script:worker -and $script:worker.HasExited -and $script:outTask.IsCompleted -and $script:errTask.IsCompleted){
   try{
    $data=$script:outTask.Result | ConvertFrom-Json
