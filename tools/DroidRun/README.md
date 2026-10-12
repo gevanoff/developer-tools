@@ -3,7 +3,8 @@
 Previously named **Android Build and Install**. Existing launcher filenames,
 project configuration, saved settings, logs, and taskbar application identity
 remain compatible. Re-run the shortcut installer to create **DroidRun** in Start;
-it removes the old default shortcut only when it targets this checkout. Restart
+it removes the old default shortcut only when it targets this checkout, including
+the pre-rename `android-build-install` directory. Restart
 the dashboard to load the new title and icon. Existing taskbar pins may need to
 be unpinned and pinned again from the new Start entry if Windows caches the old icon.
 

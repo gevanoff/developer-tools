@@ -147,6 +147,30 @@ public static class TestAdb {
     Remove-MatchingLegacyShortcut
     Assert-True (Test-Path -LiteralPath $legacyShortcutPath) 'Legacy shortcut from another checkout was removed.'
 
+    # Simulate a pre-rename installation whose session no longer exists.
+    $sessionPath = Join-Path $testRoot 'checkout with spaces\tools\DroidRun\AndroidBuildInstall-Session.ps1'
+    $oldSessionPath = Join-Path $testRoot 'checkout with spaces\tools\android-build-install\AndroidBuildInstall-Session.ps1'
+    $legacyShell = New-Object -ComObject WScript.Shell
+    try {
+        foreach ($case in @(
+            @{ Target = $powershellPath; Session = $oldSessionPath; Remove = $true },
+            @{ Target = $powershellPath; Session = $oldSessionPath.ToUpperInvariant(); Remove = $true },
+            @{ Target = $powershellPath; Session = (Join-Path $testRoot 'other\tools\android-build-install\AndroidBuildInstall-Session.ps1'); Remove = $false },
+            @{ Target = (Join-Path $testRoot 'other.exe'); Session = $oldSessionPath; Remove = $false }
+        )) {
+            $legacyShortcut = $legacyShell.CreateShortcut($legacyShortcutPath)
+            try {
+                $legacyShortcut.TargetPath = $case.Target
+                $legacyShortcut.Arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$($case.Session)`""
+                $legacyShortcut.Save()
+            }
+            finally { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($legacyShortcut) }
+            Remove-MatchingLegacyShortcut
+            Assert-True ((Test-Path -LiteralPath $legacyShortcutPath) -eq (-not $case.Remove)) 'Pre-rename shortcut ownership check failed.'
+        }
+    }
+    finally { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($legacyShell) }
+
     $runOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner `
         -Project $projectRoot `
         -JavaHome $fakeJavaHome `

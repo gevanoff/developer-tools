@@ -1,5 +1,6 @@
 # Shared by the builder, status reader, device scanner and settings dialog.
 # Loading this file never executes a project command.
+
 function Get-AndroidBuildConfig {
     param([string]$Root)
     $path = Join-Path $Root 'android-build-install.json'
