@@ -55,7 +55,7 @@ The existing `android-build-install` XDG settings, state, and virtualenv paths a
 
     ./install-desktop.sh
 
-This creates a per-user desktop entry and a ~/.local/bin/droidrun symlink. No root access is required.
+This creates a per-user desktop entry and a ~/.local/bin/droidrun symlink. No root access is required. Reinstallation removes the old generated `android-build-install.desktop` entry after the new launcher is installed, while preserving customized entries. The `android-build-install` CLI alias remains available.
 
 ## State
 
@@ -116,7 +116,7 @@ The unit tests require no Android device or SDK.
 
 The Linux and Windows implementations share Gradle, Godot 4, and custom build behavior while using platform-native paths and processes.
 
-See [Godot and custom builds](../droidrun/BUILD-BACKENDS.md) for setup and the shared configuration schema. Settings → Godot / custom build opens the configuration editor.
+See [Godot and custom builds](../DroidRun/BUILD-BACKENDS.md) for setup and the shared configuration schema. Settings → Godot / custom build opens the configuration editor.
 
 The Git column includes the checked-out branch alongside its status, for example
 `main | Current` or `feature/camera-flip | Dirty`. Detached checkouts show
