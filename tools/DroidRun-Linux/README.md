@@ -35,11 +35,11 @@ On Ubuntu, Android device access normally uses udev rules rather than a Windows 
 
 From this directory:
 
-    ./android-build-install
+    ./droidrun
 
 To open a specific project and immediately run Build & Install:
 
-    ./android-build-install /path/to/project
+    ./droidrun /path/to/project
 
 The project path is remembered for future dashboard sessions. This is the Linux analogue of launching the Windows tool with a dragged/explicit project folder.
 
@@ -49,11 +49,13 @@ The launcher creates a dedicated virtual environment under:
 
 and installs the tool editable into that environment on first launch.
 
+The existing `android-build-install` XDG settings, state, and virtualenv paths are retained deliberately for upgrade compatibility; the Python import package remains `android_build_install_linux`. The user-facing command and desktop entry are now `droidrun`.
+
 ## Desktop launcher
 
     ./install-desktop.sh
 
-This creates a per-user desktop entry and a ~/.local/bin/android-build-install symlink. No root access is required.
+This creates a per-user desktop entry and a ~/.local/bin/droidrun symlink. No root access is required.
 
 ## State
 
@@ -114,7 +116,7 @@ The unit tests require no Android device or SDK.
 
 The Linux and Windows implementations share Gradle, Godot 4, and custom build behavior while using platform-native paths and processes.
 
-See [Godot and custom builds](../android-build-install/BUILD-BACKENDS.md) for setup and the shared configuration schema. Settings → Godot / custom build opens the configuration editor.
+See [Godot and custom builds](../droidrun/BUILD-BACKENDS.md) for setup and the shared configuration schema. Settings → Godot / custom build opens the configuration editor.
 
 The Git column includes the checked-out branch alongside its status, for example
 `main | Current` or `feature/camera-flip | Dirty`. Detached checkouts show

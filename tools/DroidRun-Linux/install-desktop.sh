@@ -5,20 +5,22 @@ APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 BIN_DIR="$HOME/.local/bin"
 
 mkdir -p "$APP_DIR" "$BIN_DIR"
-ln -sfn "$ROOT/android-build-install" "$BIN_DIR/android-build-install"
+ln -sfn "$ROOT/droidrun" "$BIN_DIR/droidrun"
+# Preserve the previous CLI shortcut for existing users.
+ln -sfn "$ROOT/droidrun" "$BIN_DIR/android-build-install"
 
-cat > "$APP_DIR/android-build-install.desktop" <<EOF
+cat > "$APP_DIR/droidrun.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=DroidRun
 Icon=$ROOT/android_build_install_linux/assets/droidrun-icon.png
 Comment=Build, sync, install, and launch Android projects
-Exec="$BIN_DIR/android-build-install" %f
+Exec="$BIN_DIR/droidrun" %f
 Terminal=false
 Categories=Development;
 StartupNotify=true
 EOF
 
-chmod 0644 "$APP_DIR/android-build-install.desktop"
+chmod 0644 "$APP_DIR/droidrun.desktop"
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APP_DIR" || true
-printf 'Installed %s\n' "$APP_DIR/android-build-install.desktop"
+printf 'Installed %s\n' "$APP_DIR/droidrun.desktop"
