@@ -75,7 +75,7 @@ def resource(base, href):
             if not parts:
                 raise ValueError('EPUB path escapes archive')
             parts.pop()
-        elif part == '/':
+        elif part in ('/', '//'):
             raise ValueError('Absolute EPUB resource path')
         elif part != '.':
             parts.append(part)
@@ -134,11 +134,11 @@ def safe_name(value):
     return name or 'Book'
 
 
-def copy_new(source, target):
+def copy_new(source, target, expected_sha256=None):
     """Never overwrite. Publish only a fully written file."""
     target = Path(target)
     if target.exists():
-        if digest(source) == digest(target):
+        if (expected_sha256 is None or digest(target) == expected_sha256) and digest(source) == digest(target):
             return False
         raise FileExistsError('Different file already exists: ' + str(target))
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -147,8 +147,9 @@ def copy_new(source, target):
     temp = Path(temp_name)
     try:
         shutil.copyfile(source, temp)
-        if digest(temp) != digest(source):
-            raise ValueError('Copy verification failed')
+        staged_digest = digest(temp)
+        if staged_digest != digest(source) or (expected_sha256 is not None and staged_digest != expected_sha256):
+            raise ValueError('Copy verification failed or manifest digest mismatch')
         if os.name == 'nt':
             os.rename(temp, target)  # Windows rename refuses an existing target
         else:
@@ -291,7 +292,7 @@ def publish(args):
         validate_epub(epub)
     for entry in ready:
         epub = state / entry['epub']
-        added = copy_new(epub, dest / epub.name)
+        added = copy_new(epub, dest / epub.name, expected_sha256=entry['sha256'])
         print(('Copied: ' if added else 'Already present: ') + epub.name)
     print('Local copy verified. Cloud sync and reader display require separate verification.')
     return 0
