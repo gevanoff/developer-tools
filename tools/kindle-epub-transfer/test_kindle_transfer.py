@@ -61,6 +61,69 @@ class TransferTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'mimetype must be'):
                     kt.validate_epub(p)
 
+    def test_local_only_mimetype_extra_field_rejected(self):
+        p = self.root / 'extra field.epub'
+        epub(p)
+        # Insert a local-only extra field; keep the central-directory extras empty.
+        data = bytearray(p.read_bytes())
+        insertion = 30 + struct.unpack_from('<H', data, 26)[0]
+        extra = b'\xfe\xca\x00\x00'
+        data[insertion:insertion] = extra
+        struct.pack_into('<H', data, 28, len(extra))
+        eocd = data.rfind(b'PK\x05\x06')
+        central = struct.unpack_from('<I', data, eocd + 16)[0] + len(extra)
+        struct.pack_into('<I', data, eocd + 16, central)
+        position = central
+        while data[position:position+4] == b'PK\x01\x02':
+            offset = struct.unpack_from('<I', data, position + 42)[0]
+            if offset:
+                struct.pack_into('<I', data, position + 42, offset + len(extra))
+            name_len, extra_len, comment_len = struct.unpack_from('<HHH', data, position + 28)
+            position += 46 + name_len + extra_len + comment_len
+        p.write_bytes(data)
+        with zipfile.ZipFile(p) as z:
+            self.assertEqual(z.getinfo('mimetype').extra, b'')
+            self.assertIsNone(z.testzip())
+        with self.assertRaisesRegex(ValueError, 'local header or extra field'):
+            kt.validate_epub(p)
+
+    def test_duplicate_manifest_id_rejected(self):
+        p = self.root / 'duplicate ids.epub'
+        epub(p)
+        def change(entries):
+            result = []
+            for info, data in entries:
+                if info.filename.endswith('.opf'):
+                    root = ET.fromstring(data)
+                    root.find('manifest').insert(0, ET.Element('item', {'id': 'c', 'href': 'missing.xhtml'}))
+                    data = ET.tostring(root)
+                result.append((info, data))
+            return result
+        rewrite_epub(p, change)
+        with self.assertRaisesRegex(ValueError, 'duplicate EPUB manifest ID'):
+            kt.validate_epub(p)
+
+    def test_title_words_do_not_exclude_direct_epub_inputs(self):
+        source, profile, calibre = self.root / 'source', self.root / 'profile', self.root / 'calibre'
+        for folder in (source, profile, calibre):
+            folder.mkdir()
+        for exe in ('calibredb.exe', 'ebook-convert.exe'):
+            (calibre / exe).touch()  # direct EPUB import must never execute these
+        for name in ('The Dictionary of Lost Words.epub', 'Personal Letters of a Writer.epub'):
+            epub(source / name)
+        # A short state path also exercises the real Windows Calibre path preflight.
+        with tempfile.TemporaryDirectory(prefix='kt-') as state_name:
+            state = Path(state_name)
+            args = SimpleNamespace(source=source, state=state, calibre_config=profile,
+                                   calibre_dir=calibre, match='', limit=0)
+            with patch.object(kt, 'execute', side_effect=AssertionError('Unexpected Calibre call')):
+                self.assertEqual(kt.convert(args), 0)
+                args.match = 'dictionary'
+                self.assertEqual(kt.convert(args), 0)
+            manifest = json.loads((state / 'manifest.json').read_text(encoding='utf-8'))
+            self.assertEqual(len(manifest['books']), 2)
+            self.assertTrue(all(v['status'] == 'ready' for v in manifest['books'].values()))
+
     def test_obfuscation_requires_manifest_font(self):
         p = self.root / 'obfuscation.epub'
         for algorithm in kt.FONT_ALGORITHMS:

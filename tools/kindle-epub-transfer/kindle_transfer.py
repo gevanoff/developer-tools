@@ -8,6 +8,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -95,6 +96,15 @@ def validate_epub(path):
         if (not entries or entries[0].filename != 'mimetype'
                 or entries[0].compress_type != zipfile.ZIP_STORED):
             raise ValueError('EPUB mimetype must be the first entry and stored uncompressed')
+        z.fp.seek(entries[0].header_offset)
+        local_header = z.fp.read(30)
+        if (entries[0].header_offset != 0 or len(local_header) != 30
+                or local_header[:4] != b'PK\x03\x04'
+                or struct.unpack_from('<H', local_header, 8)[0] != zipfile.ZIP_STORED
+                or struct.unpack_from('<H', local_header, 28)[0] != 0
+                or struct.unpack_from('<H', local_header, 26)[0] != 8
+                or z.fp.read(8) != b'mimetype'):
+            raise ValueError('Invalid EPUB mimetype local header or extra field')
         if z.testzip() is not None or z.read('mimetype') != b'application/epub+zip':
             raise ValueError('Invalid EPUB ZIP/mimetype')
         container = ET.fromstring(z.read('META-INF/container.xml'))
@@ -103,7 +113,12 @@ def validate_epub(path):
             raise ValueError('EPUB has no package document')
         opf_path = resource('', rootfile.attrib['full-path'])
         opf = ET.fromstring(z.read(opf_path))
-        manifest = {i.attrib['id']: i for i in opf.findall('./{*}manifest/{*}item')}
+        manifest = {}
+        for item in opf.findall('./{*}manifest/{*}item'):
+            identifier = item.get('id')
+            if not identifier or identifier in manifest:
+                raise ValueError('Missing or duplicate EPUB manifest ID')
+            manifest[identifier] = item
         spine = opf.findall('./{*}spine/{*}itemref')
         if not spine:
             raise ValueError('EPUB has no reading order')
@@ -209,9 +224,6 @@ def convert(args):
         if not (calibre / exe).is_file():
             raise ValueError('Missing Calibre executable: ' + exe)
     selected = [b for b in books(source) if args.match.lower() in b.name.lower()]
-    # Built-in reference files and personal messages are not purchased reading books.
-    selected = [b for b in selected if not any(s in b.name.lower() for s in
-                ('kindle_users_guide', 'dictionary', 'personal letter'))]
     if args.limit:
         selected = selected[:args.limit]
     if not selected:

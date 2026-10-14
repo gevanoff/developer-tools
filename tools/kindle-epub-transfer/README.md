@@ -51,8 +51,9 @@ The ChatGPT Drive connection is not an OAuth credential available to this script
 
 ## Behavior and validation boundaries
 
-- Recursively identifies primary books, ignoring files inside `.sdr` bundles and
-  built-in guides/dictionaries/personal messages. Conversion matches filenames.
+- Recursively identifies primary books, ignoring files inside `.sdr` bundles.
+  Conversion matches filenames with `--match`; it does not infer purchase status
+  from title words or silently exclude dictionaries, guides, or personal messages.
 - Copies each book with its `.sdr` directory and any `.azw6` companion into a fresh
   job directory. Checks source and snapshot hashes to detect incomplete copies.
 - Imports through Calibre before conversion, so configured import plugins run.
@@ -63,7 +64,8 @@ The ChatGPT Drive connection is not an OAuth credential available to this script
   and encodes JPEG at quality 95. Unknown mappings fail rather than guessing.
 - Verifies ZIP CRCs, EPUB mimetype, package/manifest resources, nonempty reading
   order, spine XML, image references, unresolved placeholders, and absence of
-  content encryption. The mimetype entry must be first and uncompressed. Font
+  content encryption. Manifest IDs must be unique. The mimetype entry must be
+  first and uncompressed, with no extra field in its local ZIP header. Font
   obfuscation is allowed only when every cipher reference targets a font resource
   declared in the package manifest; other encrypted resources are rejected.
   This is structural validation, not full EPUBCheck or proof of visual fidelity.
