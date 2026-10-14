@@ -4,6 +4,7 @@ param(
     [string]$GradleTask = 'assembleDebug',
     [string]$DeviceSerial,
     [string]$PreferredApk,
+    [string]$ApkPath,
     [string]$JavaHome,
     [switch]$AutoLaunch,
     [switch]$SkipBuild,
@@ -397,7 +398,7 @@ function Resolve-DeterministicApk {
     return $null
 }
 
-if (-not $Project) {
+if (-not $Project -and -not $ApkPath) {
     if ($NoUi) { throw 'A project path is required when running without interactive UI.' }
     $Project = Select-Folder -Description 'Choose an Android project or repository folder'
     if (-not $Project) {
@@ -408,6 +409,17 @@ if (-not $Project) {
 }
 
 try {
+    if ($ApkPath) {
+        $ApkPath = [System.IO.Path]::GetFullPath($ApkPath)
+        if (-not (Test-Path -LiteralPath $ApkPath -PathType Leaf) -or
+            [IO.Path]::GetExtension($ApkPath) -ine '.apk') {
+            throw "Choose an existing .apk file: $ApkPath"
+        }
+        if ((Get-Item -LiteralPath $ApkPath).Length -eq 0) { throw 'The selected APK is empty.' }
+        if ($PreferredApk) { throw 'Use either ApkPath or PreferredApk, not both.' }
+        $SkipBuild = $true
+        if (-not $Project) { $Project = Split-Path -Parent $ApkPath }
+    }
     $Project = [System.IO.Path]::GetFullPath($Project)
     if (-not (Test-Path -LiteralPath $Project -PathType Container)) {
         throw "The project path is not a directory:`n$Project"
@@ -415,6 +427,10 @@ try {
 
     if ([string]::IsNullOrWhiteSpace($GradleTask)) { $GradleTask = 'assembleDebug' }
 
+    if ($ApkPath) {
+        $gradleRoot = $Project
+        $plan = [pscustomobject]@{ Backend = 'APK file'; Apk = $ApkPath }
+    } else {
     $gradleRoots = @(Get-GradleRoots -Root $Project)
     if ($gradleRoots.Count -eq 0) {
         throw "No supported project was found. Select a Godot/Gradle folder or configure android-build-install.json for a custom build.`n`nSelected directory:`n$Project"
@@ -423,6 +439,7 @@ try {
         -NoUiMessage 'Multiple build roots were found. Add and select the specific Android project folder containing the intended build configuration, rather than its parent repository, before running Build & Install from the dashboard.'
     $plan = Get-AndroidBuildPlan -Root $gradleRoot
     Assert-AndroidBackendApkPreference -Plan $plan -ProjectRoot $Project -Preferred $PreferredApk
+    }
 
     $needsDevice = (-not $SkipInstall) -or $AutoLaunch
     $adb = $null
@@ -505,7 +522,7 @@ try {
         }
     }
 
-    $apkCandidates = @(Get-ApkCandidates -GradleRoot $gradleRoot)
+    $apkCandidates = if ($ApkPath) { @(Get-Item -LiteralPath $ApkPath) } else { @(Get-ApkCandidates -GradleRoot $gradleRoot) }
     if ($apkCandidates.Count -eq 0) {
         throw "No APK was found at the expected build output."
     }
@@ -517,7 +534,9 @@ try {
     $needsSelectedApk = (-not $SkipInstall) -or $AutoLaunch
     $apk = $null
     if ($needsSelectedApk) {
-        $apk = Resolve-Apk -Candidates $apkCandidates -Preferred $PreferredApk -ProjectRoot $Project -GradleRoot $gradleRoot
+        $apk = if ($ApkPath) { $apkCandidates[0] } else {
+            Resolve-Apk -Candidates $apkCandidates -Preferred $PreferredApk -ProjectRoot $Project -GradleRoot $gradleRoot
+        }
     }
 
     # A successful Gradle invocation validates an unchanged UP-TO-DATE APK as

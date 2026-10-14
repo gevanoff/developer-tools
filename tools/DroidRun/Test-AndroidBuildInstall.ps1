@@ -29,6 +29,8 @@ $testRoot = Join-Path $tempBase ("WindowsTools Android Test {0}" -f [Guid]::NewG
 $previousLocalAppData = $env:LOCALAPPDATA
 $previousAndroidSdkRoot = $env:ANDROID_SDK_ROOT
 $previousAndroidHome = $env:ANDROID_HOME
+$previousTestAdbMode = $env:WINDOWSTOOLS_TEST_ADB_MODE
+$previousTestAdbLog = $env:WINDOWSTOOLS_TEST_ADB_LOG
 
 try {
     foreach ($script in Get-ChildItem -LiteralPath $toolRoot -Filter '*.ps1' -File) {
@@ -55,8 +57,19 @@ try {
     Add-Type -OutputAssembly (Join-Path $fakePlatformTools 'adb.exe') -OutputType ConsoleApplication -TypeDefinition @'
 public static class TestAdb {
     public static int Main(string[] args) {
+        string mode = System.Environment.GetEnvironmentVariable("WINDOWSTOOLS_TEST_ADB_MODE");
         if (args.Length > 0 && args[0] == "devices") {
             System.Console.WriteLine("List of devices attached");
+            if (!string.IsNullOrEmpty(mode)) System.Console.WriteLine("test-device device model:Test_Phone");
+            return 0;
+        }
+        if (!string.IsNullOrEmpty(mode)) {
+            System.IO.File.AppendAllText(System.Environment.GetEnvironmentVariable("WINDOWSTOOLS_TEST_ADB_LOG"), string.Join("|", args) + "\n");
+            if (mode == "signing") {
+                System.Console.WriteLine("Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE]");
+                return 1;
+            }
+            System.Console.WriteLine("Success");
             return 0;
         }
         System.Console.Error.WriteLine("Unexpected adb operation in isolated test.");
@@ -108,6 +121,29 @@ public static class TestAdb {
     (Get-Item -LiteralPath $apkPath).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-10)
     (Get-Item -LiteralPath $sourcePath).LastWriteTimeUtc = [DateTime]::UtcNow
     $env:LOCALAPPDATA = Join-Path $testRoot 'state with spaces'
+
+    $directApk = Join-Path $testRoot 'standalone APK with spaces.apk'
+    Set-Content -LiteralPath $directApk -Value 'test package' -Encoding ASCII
+    $directTimestamp = (Get-Item -LiteralPath $directApk).LastWriteTimeUtc.Ticks
+    $env:WINDOWSTOOLS_TEST_ADB_MODE = 'success'
+    $env:WINDOWSTOOLS_TEST_ADB_LOG = Join-Path $testRoot 'direct install calls.txt'
+    $directOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -ApkPath $directApk -DeviceSerial 'test-device' -NoUi 2>&1)
+    Assert-True ($LASTEXITCODE -eq 0) "Direct APK installation failed: $($directOutput -join '\n')"
+    Assert-True ((Get-Content -LiteralPath $env:WINDOWSTOOLS_TEST_ADB_LOG -Raw).Trim() -eq "-s|test-device|install|-r|$directApk") 'The direct install did not pass the exact path as one argument.'
+    Assert-True ((Get-Item -LiteralPath $directApk).LastWriteTimeUtc.Ticks -eq $directTimestamp) 'Direct install changed the APK timestamp.'
+    $apkUiOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $session -Project $projectRoot -UiSmokeTestApkPath $directApk 2>&1)
+    Assert-True ($LASTEXITCODE -eq 0) "Dashboard APK installation failed: $($apkUiOutput -join '\n')"
+    Assert-True (($apkUiOutput -join '\n') -match 'Installing:') 'Dashboard did not run the direct APK installation.'
+    $env:WINDOWSTOOLS_TEST_ADB_MODE = 'signing'
+    $signingOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -ApkPath $directApk -DeviceSerial 'test-device' -NoUi 2>&1)
+    Assert-True ($LASTEXITCODE -ne 0) 'A signing conflict unexpectedly succeeded.'
+    Assert-True (($signingOutput -join '\n') -match 'will not uninstall') 'Signing conflict lost its data-preservation explanation.'
+    Assert-True ((Get-Content -LiteralPath $env:WINDOWSTOOLS_TEST_ADB_LOG -Raw) -notmatch 'uninstall') 'Signing failure attempted an uninstall.'
+    $callsBefore = Get-Content -LiteralPath $env:WINDOWSTOOLS_TEST_ADB_LOG -Raw
+    $missingOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner -ApkPath (Join-Path $testRoot 'missing.apk') -NoUi 2>&1)
+    Assert-True ($LASTEXITCODE -ne 0) 'A missing APK unexpectedly succeeded.'
+    Assert-True ((Get-Content -LiteralPath $env:WINDOWSTOOLS_TEST_ADB_LOG -Raw) -eq $callsBefore) 'Invalid input invoked installation.'
+    $env:WINDOWSTOOLS_TEST_ADB_MODE = $null
 
     $testShortcut = Join-Path $testRoot 'Start Menu\DroidRun.lnk'
     $shortcutOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $shortcutInstaller `
@@ -273,6 +309,8 @@ finally {
     $env:LOCALAPPDATA = $previousLocalAppData
     $env:ANDROID_SDK_ROOT = $previousAndroidSdkRoot
     $env:ANDROID_HOME = $previousAndroidHome
+    $env:WINDOWSTOOLS_TEST_ADB_MODE = $previousTestAdbMode
+    $env:WINDOWSTOOLS_TEST_ADB_LOG = $previousTestAdbLog
     $resolvedTestRoot = [System.IO.Path]::GetFullPath($testRoot)
     if ($resolvedTestRoot.StartsWith($tempBase, [System.StringComparison]::OrdinalIgnoreCase) -and
         (Split-Path -Leaf $resolvedTestRoot) -like 'WindowsTools Android Test *' -and
