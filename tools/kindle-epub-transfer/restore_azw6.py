@@ -48,12 +48,16 @@ def restore(azw6, source, target):
     images = image_records(Path(azw6).read_bytes())
     with zipfile.ZipFile(source) as z:
         replacements, payloads = {}, {}
+        seen_numbers = set()
         for name in z.namelist():
             if not name.endswith('.unknown'):
                 continue
             number = int(PurePosixPath(name).stem)
             if z.read(name) != b'\xa0\xa0\xa0\xa0' or number not in images:
                 raise ValueError('EPUB placeholder does not match AZW6: ' + name)
+            if number in seen_numbers:
+                raise ValueError('Duplicate AZW6 placeholder ID: ' + str(number))
+            seen_numbers.add(number)
             dest = str(PurePosixPath(name).with_suffix('.jpeg'))
             if dest in z.namelist():
                 raise ValueError('Image filename collision')
@@ -65,7 +69,7 @@ def restore(azw6, source, target):
                 raise ValueError('JPEG conversion failed')
             replacements[name] = dest
             payloads[dest] = converted
-        if not replacements or len(replacements) != len(images):
+        if not replacements or seen_numbers != set(images):
             raise ValueError('Incomplete match between AZW6 pages and EPUB placeholders')
         container = ET.fromstring(z.read('META-INF/container.xml'))
         opf_name = container.find('.//{*}rootfile').attrib['full-path']

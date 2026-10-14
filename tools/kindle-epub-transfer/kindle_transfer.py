@@ -8,6 +8,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,10 @@ import zipfile
 FORMATS = {'.kfx', '.azw', '.azw3', '.mobi', '.epub'}
 FONT_ALGORITHMS = {'http://www.idpf.org/2008/embedding',
                    'http://ns.adobe.com/pdf/enc#RC'}
+FONT_MEDIA_TYPES = {'font/otf', 'font/ttf', 'font/woff', 'font/woff2',
+                    'application/vnd.ms-opentype', 'application/font-sfnt',
+                    'application/font-woff', 'application/x-font-ttf',
+                    'application/x-font-opentype'}
 
 
 def digest(path):
@@ -65,7 +70,7 @@ def fingerprint(book):
 
 def resource(base, href):
     name = unquote(href.split('#')[0])
-    if not name or '\\' in name or ':' in name:
+    if not name or name.startswith('/') or '\\' in name or ':' in name:
         raise ValueError('Invalid EPUB resource path')
     path = PurePosixPath(base) / name
     # Resolve ../ within the archive without extracting anything.
@@ -75,7 +80,7 @@ def resource(base, href):
             if not parts:
                 raise ValueError('EPUB path escapes archive')
             parts.pop()
-        elif part == '/':
+        elif part in ('/', '//'):
             raise ValueError('Absolute EPUB resource path')
         elif part != '.':
             parts.append(part)
@@ -87,29 +92,60 @@ def validate_epub(path):
     with zipfile.ZipFile(path) as z:
         if len(z.namelist()) != len(set(z.namelist())):
             raise ValueError('Duplicate EPUB archive members')
+        entries = z.infolist()
+        if (not entries or entries[0].filename != 'mimetype'
+                or entries[0].compress_type != zipfile.ZIP_STORED):
+            raise ValueError('EPUB mimetype must be the first entry and stored uncompressed')
+        z.fp.seek(entries[0].header_offset)
+        local_header = z.fp.read(30)
+        if (entries[0].header_offset != 0 or len(local_header) != 30
+                or local_header[:4] != b'PK\x03\x04'
+                or struct.unpack_from('<H', local_header, 8)[0] != zipfile.ZIP_STORED
+                or struct.unpack_from('<H', local_header, 28)[0] != 0
+                or struct.unpack_from('<H', local_header, 26)[0] != 8
+                or z.fp.read(8) != b'mimetype'):
+            raise ValueError('Invalid EPUB mimetype local header or extra field')
         if z.testzip() is not None or z.read('mimetype') != b'application/epub+zip':
             raise ValueError('Invalid EPUB ZIP/mimetype')
-        if 'META-INF/encryption.xml' in z.namelist():
-            enc = ET.fromstring(z.read('META-INF/encryption.xml'))
-            methods = enc.findall('.//{*}EncryptionMethod')
-            if not methods or any(m.get('Algorithm') not in FONT_ALGORITHMS for m in methods):
-                raise ValueError('EPUB still contains encrypted resources')
         container = ET.fromstring(z.read('META-INF/container.xml'))
         rootfile = container.find('.//{*}rootfile')
         if rootfile is None:
             raise ValueError('EPUB has no package document')
         opf_path = resource('', rootfile.attrib['full-path'])
         opf = ET.fromstring(z.read(opf_path))
-        manifest = {i.attrib['id']: i for i in opf.findall('./{*}manifest/{*}item')}
+        manifest = {}
+        for item in opf.findall('./{*}manifest/{*}item'):
+            identifier = item.get('id')
+            if not identifier or identifier in manifest:
+                raise ValueError('Missing or duplicate EPUB manifest ID')
+            manifest[identifier] = item
         spine = opf.findall('./{*}spine/{*}itemref')
         if not spine:
             raise ValueError('EPUB has no reading order')
+        resource_types = {}
         for entry in manifest.values():
             target = resource(str(PurePosixPath(opf_path).parent), entry.attrib['href'])
+            resource_types.setdefault(target, set()).add(entry.get('media-type'))
             if target not in z.namelist():
                 raise ValueError('Missing EPUB resource: ' + target)
             if target.endswith('.unknown') or z.read(target) == b'\xa0\xa0\xa0\xa0':
                 raise ValueError('Unresolved Kindle image placeholder: ' + target)
+        if 'META-INF/encryption.xml' in z.namelist():
+            enc = ET.fromstring(z.read('META-INF/encryption.xml'))
+            encrypted = enc.findall('.//{*}EncryptedData')
+            if not encrypted:
+                raise ValueError('EPUB encryption has no resource declarations')
+            for declaration in encrypted:
+                methods = declaration.findall('./{*}EncryptionMethod')
+                references = declaration.findall('./{*}CipherData/{*}CipherReference')
+                if (len(methods) != 1 or methods[0].get('Algorithm') not in FONT_ALGORITHMS
+                        or len(references) != 1):
+                    raise ValueError('EPUB still contains encrypted resources')
+                # CipherReference URIs are relative to the container root, not META-INF.
+                target = resource('', references[0].get('URI', ''))
+                media_types = resource_types.get(target, set())
+                if not media_types or not media_types.issubset(FONT_MEDIA_TYPES):
+                    raise ValueError('EPUB obfuscation target is not a manifest font: ' + target)
         for entry in spine:
             item = manifest.get(entry.attrib['idref'])
             if item is None:
@@ -134,11 +170,11 @@ def safe_name(value):
     return name or 'Book'
 
 
-def copy_new(source, target):
+def copy_new(source, target, expected_sha256=None):
     """Never overwrite. Publish only a fully written file."""
     target = Path(target)
     if target.exists():
-        if digest(source) == digest(target):
+        if (expected_sha256 is None or digest(target) == expected_sha256) and digest(source) == digest(target):
             return False
         raise FileExistsError('Different file already exists: ' + str(target))
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -147,8 +183,9 @@ def copy_new(source, target):
     temp = Path(temp_name)
     try:
         shutil.copyfile(source, temp)
-        if digest(temp) != digest(source):
-            raise ValueError('Copy verification failed')
+        staged_digest = digest(temp)
+        if staged_digest != digest(source) or (expected_sha256 is not None and staged_digest != expected_sha256):
+            raise ValueError('Copy verification failed or manifest digest mismatch')
         if os.name == 'nt':
             os.rename(temp, target)  # Windows rename refuses an existing target
         else:
@@ -187,9 +224,6 @@ def convert(args):
         if not (calibre / exe).is_file():
             raise ValueError('Missing Calibre executable: ' + exe)
     selected = [b for b in books(source) if args.match.lower() in b.name.lower()]
-    # Built-in reference files and personal messages are not purchased reading books.
-    selected = [b for b in selected if not any(s in b.name.lower() for s in
-                ('kindle_users_guide', 'dictionary', 'personal letter'))]
     if args.limit:
         selected = selected[:args.limit]
     if not selected:
@@ -291,7 +325,7 @@ def publish(args):
         validate_epub(epub)
     for entry in ready:
         epub = state / entry['epub']
-        added = copy_new(epub, dest / epub.name)
+        added = copy_new(epub, dest / epub.name, expected_sha256=entry['sha256'])
         print(('Copied: ' if added else 'Already present: ') + epub.name)
     print('Local copy verified. Cloud sync and reader display require separate verification.')
     return 0

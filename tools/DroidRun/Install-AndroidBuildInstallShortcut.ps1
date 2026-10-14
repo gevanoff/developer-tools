@@ -25,8 +25,15 @@ function Remove-MatchingLegacyShortcut {
     $legacyShortcut = $null
     try {
         $legacyShortcut = $legacyShell.CreateShortcut($legacyShortcutPath)
+        # The original directory no longer exists after an in-place upgrade.
+        # Construct its path without resolving it, and scope it to this checkout.
+        $toolsPath = Split-Path -Parent (Split-Path -Parent $sessionPath)
+        $oldSessionPath = Join-Path $toolsPath 'android-build-install\AndroidBuildInstall-Session.ps1'
+        $matchingArguments = @($sessionPath, $oldSessionPath) | ForEach-Object {
+            "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$_`""
+        }
         if ($legacyShortcut.TargetPath -ieq $powershellPath -and
-            $legacyShortcut.Arguments -eq "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$sessionPath`"") {
+            $matchingArguments -icontains $legacyShortcut.Arguments) {
             Remove-Item -LiteralPath $legacyShortcutPath -Force
         }
     }

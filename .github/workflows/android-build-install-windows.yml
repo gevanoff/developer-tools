@@ -1,12 +1,12 @@
-name: Android Build Install Windows
+name: DroidRun Windows
 on:
   push:
     paths:
-      - "tools/android-build-install/**"
+      - "tools/DroidRun/**"
       - ".github/workflows/android-build-install-windows.yml"
   pull_request:
     paths:
-      - "tools/android-build-install/**"
+      - "tools/DroidRun/**"
       - ".github/workflows/android-build-install-windows.yml"
 permissions:
   contents: read
@@ -17,7 +17,7 @@ jobs:
     defaults:
       run:
         shell: powershell
-        working-directory: tools/android-build-install
+        working-directory: tools/DroidRun
     steps:
       - uses: actions/checkout@v4
       - run: ./Test-AndroidBuildBackends.ps1
