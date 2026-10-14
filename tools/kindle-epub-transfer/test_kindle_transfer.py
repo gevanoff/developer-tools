@@ -108,11 +108,11 @@ class TransferTests(unittest.TestCase):
         from types import ModuleType
         codec = ModuleType('calibre.utils.img')
         codec.load_jxr_data = lambda data: SimpleNamespace(isNull=lambda: False)
-        codec.image_to_data = lambda *args, **kwargs: b'\\xff\\xd8jpeg'
+        codec.image_to_data = lambda *args, **kwargs: b'\xff\xd8jpeg'
         source = self.root / 'placeholders.epub'
         with zipfile.ZipFile(source, 'w') as z:
-            z.writestr('a/0.unknown', b'\\xa0' * 4)
-            z.writestr('b/0.unknown', b'\\xa0' * 4)
+            z.writestr('a/0.unknown', b'\xa0' * 4)
+            z.writestr('b/0.unknown', b'\xa0' * 4)
         (self.root / 'unused.azw6').write_bytes(b'dummy')
         with patch.dict(sys.modules, {'calibre': ModuleType('calibre'),
                                       'calibre.utils': ModuleType('calibre.utils'),
