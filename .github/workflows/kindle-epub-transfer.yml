@@ -1,0 +1,27 @@
+name: Kindle EPUB Transfer
+on:
+  push:
+    paths:
+      - 'tools/kindle-epub-transfer/**'
+      - '.github/workflows/kindle-epub-transfer.yml'
+  pull_request:
+    paths:
+      - 'tools/kindle-epub-transfer/**'
+      - '.github/workflows/kindle-epub-transfer.yml'
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m unittest discover -s tools/kindle-epub-transfer -p "test_*.py" -v
+      - name: Parse Windows launcher
+        shell: powershell
+        run: |
+          $parseErrors = $null
+          $tokens = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            "$pwd/tools/kindle-epub-transfer/Run-KindleTransfer.ps1", [ref]$tokens, [ref]$parseErrors)
+          if ($parseErrors) { throw ($parseErrors | Out-String) }
