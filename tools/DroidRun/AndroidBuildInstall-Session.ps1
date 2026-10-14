@@ -6,7 +6,8 @@ param(
     [Parameter(DontShow = $true)][switch]$UiSmokeTestOperationSuccess,
     [Parameter(DontShow = $true)][switch]$UiSmokeTestCancellation,
     [Parameter(DontShow = $true)][switch]$UiSmokeTestStatusRefresh,
-    [Parameter(DontShow = $true)][switch]$UiSmokeTestInheritedOutput
+    [Parameter(DontShow = $true)][switch]$UiSmokeTestInheritedOutput,
+    [Parameter(DontShow = $true)][string]$UiSmokeTestApkPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,7 +16,7 @@ Add-Type -AssemblyName System.Drawing
 . (Join-Path $PSScriptRoot 'WindowsTaskbarIdentity.ps1')
 [System.Windows.Forms.Application]::EnableVisualStyles()
 $isUiSmokeTest = $UiSmokeTest -or $UiSmokeTestOperation -or $UiSmokeTestOperationSuccess -or
-    $UiSmokeTestCancellation -or $UiSmokeTestStatusRefresh -or $UiSmokeTestInheritedOutput
+    $UiSmokeTestCancellation -or $UiSmokeTestStatusRefresh -or $UiSmokeTestInheritedOutput -or $UiSmokeTestApkPath
 $appUserModelId = Get-AndroidBuildInstallAppId
 $taskbarIdentityAvailable = $null -ne ('WindowsTools.TaskbarIdentity' -as [type])
 if ($taskbarIdentityAvailable) {
@@ -696,6 +697,12 @@ function Select-SavedProjectAction {
     $gitPull.TabIndex = 4
     $form.Controls.Add($gitPull)
 
+    $installApk = New-Object System.Windows.Forms.Button
+    $installApk.Text = 'Install &APK...'
+    $installApk.Size = New-Object System.Drawing.Size(120, 32)
+    $installApk.TabIndex = 14
+    $form.Controls.Add($installApk)
+
     $settings = New-Object System.Windows.Forms.Button
     $settings.Text = 'Se&ttings...'
     $settings.Size = New-Object System.Drawing.Size(100, 32)
@@ -817,6 +824,7 @@ function Select-SavedProjectAction {
         $scan.Location = New-Object System.Drawing.Point(($reports.Right + $gap), $secondButtonRow)
         $refresh.Location = New-Object System.Drawing.Point(($scan.Right + $gap), $secondButtonRow)
         $gitPull.Location = New-Object System.Drawing.Point(($refresh.Right + $gap), $secondButtonRow)
+        $installApk.Location = New-Object System.Drawing.Point(($gitPull.Right + $gap), $secondButtonRow)
         $exit.Location = New-Object System.Drawing.Point(($right - $exit.Width), $secondButtonRow)
 
         $fixedColumnWidth = $list.Columns[0].Width + $list.Columns[1].Width +
@@ -1173,6 +1181,7 @@ function Select-SavedProjectAction {
         $settings.Enabled = $selected -and -not $anyBusy
         $sync.Enabled = $selected -and -not $anyBusy
         $build.Enabled = $selected -and -not $anyBusy
+        $installApk.Enabled = $selected -and -not $anyBusy
         $cancelOperation.Enabled = $busy
         $operationProgress.Visible = $busy
         if ($null -ne $trayCancel) {
@@ -1258,7 +1267,7 @@ function Select-SavedProjectAction {
             $trayIcon.ShowBalloonTip(3000)
         }
         & $setOperationControls
-        if ($UiSmokeTestOperation -or $UiSmokeTestOperationSuccess -or $UiSmokeTestCancellation -or $UiSmokeTestInheritedOutput) {
+        if ($UiSmokeTestOperation -or $UiSmokeTestOperationSuccess -or $UiSmokeTestCancellation -or $UiSmokeTestInheritedOutput -or $UiSmokeTestApkPath) {
             Write-Host $operationOutput.Text
             Write-Host "UI operation elapsed seconds: $($elapsed.TotalSeconds)"
             Write-Host "UI operation smoke result: $exitCode"
@@ -1288,8 +1297,9 @@ function Select-SavedProjectAction {
 
     $startOperation = {
         param(
-            [ValidateSet('Sync', 'Build', 'GitPull', 'SmokeSuccess', 'SmokeCancel', 'SmokeInheritedOutput')][string]$Action,
-            [string]$ProjectPath
+            [ValidateSet('Sync', 'Build', 'InstallApk', 'GitPull', 'SmokeSuccess', 'SmokeCancel', 'SmokeInheritedOutput')][string]$Action,
+            [string]$ProjectPath,
+            [string]$SelectedApk
         )
 
         if ($null -ne $dashboardState.Operation -or $null -ne $dashboardState.StatusRefresh) { return }
@@ -1303,6 +1313,8 @@ function Select-SavedProjectAction {
             'Sync & Run'
         } elseif ($Action -eq 'Build') {
             'Build & Install'
+        } elseif ($Action -eq 'InstallApk') {
+            'Install APK'
         } elseif ($Action -eq 'GitPull') {
             'Git Pull'
         } elseif ($Action -eq 'SmokeSuccess') {
@@ -1346,10 +1358,11 @@ function Select-SavedProjectAction {
         if ($Action -eq 'Sync') {
             $arguments += @('-PreferencesPath', $preferencesPath, '-NoUi')
         }
-        elseif ($Action -eq 'Build') {
+        elseif ($Action -eq 'Build' -or $Action -eq 'InstallApk') {
             $pref = Get-ProjectPreference -ProjectPath $ProjectPath
             $arguments += @('-GradleTask', $pref.gradleTask, '-SuppressSuccessDialog', '-NoUi')
-            if ($pref.preferredApk) { $arguments += @('-PreferredApk', $pref.preferredApk) }
+            if ($Action -eq 'InstallApk') { $arguments += @('-ApkPath', $SelectedApk) }
+            elseif ($pref.preferredApk) { $arguments += @('-PreferredApk', $pref.preferredApk) }
             if ($pref.javaHome) { $arguments += @('-JavaHome', $pref.javaHome) }
             if ($pref.deviceSerial) { $arguments += @('-DeviceSerial', $pref.deviceSerial) }
             if ($pref.autoLaunch) { $arguments += '-AutoLaunch' }
@@ -1408,6 +1421,21 @@ function Select-SavedProjectAction {
 
     $sync.Add_Click({ & $startOperation 'Sync' })
     $build.Add_Click({ & $startOperation 'Build' })
+    $installApk.Add_Click({
+        $path = & $selectedPath
+        if (-not $path) { return }
+        $picker = New-Object System.Windows.Forms.OpenFileDialog
+        try {
+            $picker.Title = 'Choose APK to install'
+            $picker.Filter = 'Android packages (*.apk)|*.apk'
+            $picker.CheckFileExists = $true
+            $picker.Multiselect = $false
+            $picker.InitialDirectory = $path
+            if ($picker.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {
+                & $startOperation 'InstallApk' $path $picker.FileName
+            }
+        } finally { $picker.Dispose() }
+    })
     $list.Add_DoubleClick({ if ($list.SelectedItems.Count -eq 1) { & $startOperation 'Sync' } })
 
     $copyOutput.Add_Click({
@@ -1476,7 +1504,14 @@ function Select-SavedProjectAction {
             Write-Host "UI taskbar identity: $appUserModelId"
             $form.ClientSize = New-Object System.Drawing.Size(940, 700)
             & $layoutDashboard
+            if (-not $form.ClientRectangle.Contains($installApk.Bounds) -or
+                $installApk.Bounds.IntersectsWith($exit.Bounds)) { throw 'Install APK button is clipped or overlaps Exit.' }
+            Write-Host 'UI Install APK button: visible and unobstructed'
             $form.Close()
+            return
+        }
+        if ($UiSmokeTestApkPath) {
+            & $startOperation 'InstallApk' $InitialProject $UiSmokeTestApkPath
             return
         }
         if ($UiSmokeTestOperationSuccess) {

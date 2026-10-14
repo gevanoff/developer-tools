@@ -1,9 +1,10 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][string]$Project,
+    [string]$Project,
     [string]$GradleTask = 'assembleDebug',
     [string]$DeviceSerial,
     [string]$PreferredApk,
+    [string]$ApkPath,
     [string]$JavaHome,
     [switch]$AutoLaunch,
     [switch]$SkipBuild,
@@ -14,6 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($ApkPath) { $SkipBuild = $true }
 Add-Type -AssemblyName System.Windows.Forms
 
 $stateRoot = if ($env:LOCALAPPDATA) {
@@ -34,6 +36,7 @@ $implementationParameters = @{
 }
 if ($DeviceSerial) { $implementationParameters.DeviceSerial = $DeviceSerial }
 if ($PreferredApk) { $implementationParameters.PreferredApk = $PreferredApk }
+if ($ApkPath) { $implementationParameters.ApkPath = $ApkPath }
 if ($JavaHome) { $implementationParameters.JavaHome = $JavaHome }
 if ($AutoLaunch) { $implementationParameters.AutoLaunch = $true }
 if ($SkipBuild) { $implementationParameters.SkipBuild = $true }
@@ -51,6 +54,7 @@ if ($NoUi) { $implementationParameters.NoUi = $true }
     "Selected project argument: $Project",
     "Gradle task: $GradleTask",
     "Preferred APK: $PreferredApk",
+    "Selected APK file: $ApkPath",
     "JAVA_HOME override: $JavaHome",
     "Device serial: $DeviceSerial",
     "Auto-launch: $([bool]$AutoLaunch)",

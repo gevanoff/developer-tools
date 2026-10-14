@@ -40,6 +40,7 @@ The available actions are:
 
 - **Sync & Run** — safely update Git when needed, rebuild stale/missing Gradle or Godot APKs, run custom builders to validate their dependencies, install only when the device differs, and optionally launch the app;
 - **Build & Install** — always run the configured build, install the selected APK, and optionally launch it;
+- **Install APK...** — select a project, then choose any existing `.apk` file (including an APK built in a feature-branch worktree). Install that exact file using the project's device and auto-launch settings, without building, pulling Git, changing branches, or changing its preferred APK. Multiple devices still require an explicit device setting. Reopen DroidRun after updating to see the new button.
 - **Git Pull** — explicitly run the safe fast-forward-only repository update;
 - **Refresh Status** — refresh Git remote state, local APK freshness, and device comparison;
 - **Settings...** — configure persistent project-specific defaults including a preferred device;
@@ -214,6 +215,14 @@ assembleDemoDebug
 ```
 
 ### Preferred APK
+
+For a one-time install from any folder, use **Install APK...**. This does not change the project's saved preferred APK or the selected file's timestamp. Signing conflicts fail safely without uninstalling the existing app or deleting its data. The equivalent Windows command is:
+
+```powershell
+.\Run-AndroidBuildInstall.ps1 -ApkPath 'C:\Builds\Feature build\app-debug.apk' -DeviceSerial 'device-serial' -AutoLaunch -NoUi
+```
+
+`-Project` is optional in this direct-file mode; an Android build project and Java are not required. This installs a single APK, not a split APK bundle.
 
 When a project produces several debug APKs, a preferred APK can be stored so Build & Install, Scan Device, dashboard status, and Sync & Run all use the same deterministic target.
 
