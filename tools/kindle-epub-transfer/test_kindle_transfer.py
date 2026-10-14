@@ -113,6 +113,7 @@ class TransferTests(unittest.TestCase):
         with zipfile.ZipFile(source, 'w') as z:
             z.writestr('a/0.unknown', b'\\xa0' * 4)
             z.writestr('b/0.unknown', b'\\xa0' * 4)
+        (self.root / 'unused.azw6').write_bytes(b'dummy')
         with patch.dict(sys.modules, {'calibre': ModuleType('calibre'),
                                       'calibre.utils': ModuleType('calibre.utils'),
                                       'calibre.utils.img': codec}):
