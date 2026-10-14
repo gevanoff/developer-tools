@@ -4,6 +4,7 @@ param(
     [string]$GradleTask = 'assembleDebug',
     [string]$DeviceSerial,
     [string]$PreferredApk,
+    [string]$ApkPath,
     [string]$JavaHome,
     [switch]$AutoLaunch
 )
@@ -24,6 +25,7 @@ if ($Project) { $arguments += @('-Project', $Project) }
 if ($GradleTask) { $arguments += @('-GradleTask', $GradleTask) }
 if ($DeviceSerial) { $arguments += @('-DeviceSerial', $DeviceSerial) }
 if ($PreferredApk) { $arguments += @('-PreferredApk', $PreferredApk) }
+if ($ApkPath) { $arguments += @('-ApkPath', $ApkPath) }
 if ($JavaHome) { $arguments += @('-JavaHome', $JavaHome) }
 if ($AutoLaunch) { $arguments += '-AutoLaunch' }
 
