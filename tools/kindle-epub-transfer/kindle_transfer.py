@@ -65,7 +65,7 @@ def fingerprint(book):
 
 def resource(base, href):
     name = unquote(href.split('#')[0])
-    if not name or '\\' in name or ':' in name:
+    if not name or name.startswith('/') or '\\' in name or ':' in name:
         raise ValueError('Invalid EPUB resource path')
     path = PurePosixPath(base) / name
     # Resolve ../ within the archive without extracting anything.
