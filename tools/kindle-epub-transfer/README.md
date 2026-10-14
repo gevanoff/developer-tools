@@ -63,7 +63,9 @@ The ChatGPT Drive connection is not an OAuth credential available to this script
   and encodes JPEG at quality 95. Unknown mappings fail rather than guessing.
 - Verifies ZIP CRCs, EPUB mimetype, package/manifest resources, nonempty reading
   order, spine XML, image references, unresolved placeholders, and absence of
-  content encryption. Font obfuscation is allowed.
+  content encryption. The mimetype entry must be first and uncompressed. Font
+  obfuscation is allowed only when every cipher reference targets a font resource
+  declared in the package manifest; other encrypted resources are rejected.
   This is structural validation, not full EPUBCheck or proof of visual fidelity.
   Missing illustrations already absent from the source cannot be detected reliably.
 - Output names include a content hash. Repeated identical copies are skipped;

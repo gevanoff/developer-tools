@@ -6,6 +6,7 @@ from unittest.mock import patch
 from types import SimpleNamespace
 import unittest
 import zipfile
+import xml.etree.ElementTree as ET
 
 import kindle_transfer as kt
 from restore_azw6 import image_records, restore
@@ -23,6 +24,15 @@ def epub(path, missing=False, encryption=False, missing_image=False):
             z.writestr('META-INF/encryption.xml', '<encryption><EncryptedData><EncryptionMethod Algorithm="AES"/></EncryptedData></encryption>')
 
 
+def rewrite_epub(path, change):
+    with zipfile.ZipFile(path) as z:
+        entries = [(info, z.read(info)) for info in z.infolist()]
+    entries = change(entries)
+    with zipfile.ZipFile(path, 'w') as z:
+        for info, data in entries:
+            z.writestr(info, data)
+
+
 class TransferTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='kindle tests ')
@@ -35,6 +45,63 @@ class TransferTests(unittest.TestCase):
         p = self.root / 'A book.epub'
         epub(p)
         self.assertEqual(kt.validate_epub(p)['spine_items'], 1)
+
+    def test_mimetype_packaging_rejected(self):
+        p = self.root / 'bad packaging.epub'
+        for invalid in ('compressed', 'not-first'):
+            with self.subTest(invalid=invalid):
+                epub(p)
+                def change(entries):
+                    if invalid == 'compressed':
+                        entries[0][0].compress_type = zipfile.ZIP_DEFLATED
+                    else:
+                        entries[0], entries[1] = entries[1], entries[0]
+                    return entries
+                rewrite_epub(p, change)
+                with self.assertRaisesRegex(ValueError, 'mimetype must be'):
+                    kt.validate_epub(p)
+
+    def test_obfuscation_requires_manifest_font(self):
+        p = self.root / 'obfuscation.epub'
+        for algorithm in kt.FONT_ALGORITHMS:
+            for media_type, declared in (('font/otf', True), ('application/vnd.ms-opentype', True),
+                                          ('image/jpeg', True), ('application/xhtml+xml', True),
+                                          ('font/otf', False)):
+                with self.subTest(algorithm=algorithm, media_type=media_type, declared=declared):
+                    epub(p)
+                    def change(entries):
+                        result = []
+                        for info, data in entries:
+                            if info.filename.endswith('.opf') and declared:
+                                root = ET.fromstring(data)
+                                ET.SubElement(root.find('manifest'), 'item', {
+                                    'id': 'obfuscated', 'href': 'fonts/a%20font.otf', 'media-type': media_type})
+                                data = ET.tostring(root)
+                            result.append((info, data))
+                        result.append(('OPS/fonts/a font.otf', b'obfuscated bytes'))
+                        result.append(('META-INF/encryption.xml',
+                            '<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container" '
+                            'xmlns:e="http://www.w3.org/2001/04/xmlenc#"><e:EncryptedData>'
+                            '<e:EncryptionMethod Algorithm="' + algorithm + '"/>'
+                            '<e:CipherData><e:CipherReference URI="OPS/fonts/a%20font.otf"/>'
+                            '</e:CipherData></e:EncryptedData></encryption>'))
+                        return result
+                    rewrite_epub(p, change)
+                    if declared and media_type in kt.FONT_MEDIA_TYPES:
+                        self.assertEqual(kt.validate_epub(p)['spine_items'], 1)
+                    else:
+                        with self.assertRaisesRegex(ValueError, 'not a manifest font'):
+                            kt.validate_epub(p)
+
+    def test_obfuscation_missing_cipher_reference_rejected(self):
+        p = self.root / 'missing cipher.epub'
+        epub(p)
+        with zipfile.ZipFile(p, 'a') as z:
+            z.writestr('META-INF/encryption.xml', '<encryption><EncryptedData>'
+                       '<EncryptionMethod Algorithm="http://www.idpf.org/2008/embedding"/>'
+                       '</EncryptedData></encryption>')
+        with self.assertRaisesRegex(ValueError, 'encrypted resources'):
+            kt.validate_epub(p)
 
     def test_missing_content_rejected(self):
         p = self.root / 'bad.epub'

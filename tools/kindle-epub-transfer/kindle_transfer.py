@@ -18,6 +18,10 @@ import zipfile
 FORMATS = {'.kfx', '.azw', '.azw3', '.mobi', '.epub'}
 FONT_ALGORITHMS = {'http://www.idpf.org/2008/embedding',
                    'http://ns.adobe.com/pdf/enc#RC'}
+FONT_MEDIA_TYPES = {'font/otf', 'font/ttf', 'font/woff', 'font/woff2',
+                    'application/vnd.ms-opentype', 'application/font-sfnt',
+                    'application/font-woff', 'application/x-font-ttf',
+                    'application/x-font-opentype'}
 
 
 def digest(path):
@@ -87,13 +91,12 @@ def validate_epub(path):
     with zipfile.ZipFile(path) as z:
         if len(z.namelist()) != len(set(z.namelist())):
             raise ValueError('Duplicate EPUB archive members')
+        entries = z.infolist()
+        if (not entries or entries[0].filename != 'mimetype'
+                or entries[0].compress_type != zipfile.ZIP_STORED):
+            raise ValueError('EPUB mimetype must be the first entry and stored uncompressed')
         if z.testzip() is not None or z.read('mimetype') != b'application/epub+zip':
             raise ValueError('Invalid EPUB ZIP/mimetype')
-        if 'META-INF/encryption.xml' in z.namelist():
-            enc = ET.fromstring(z.read('META-INF/encryption.xml'))
-            methods = enc.findall('.//{*}EncryptionMethod')
-            if not methods or any(m.get('Algorithm') not in FONT_ALGORITHMS for m in methods):
-                raise ValueError('EPUB still contains encrypted resources')
         container = ET.fromstring(z.read('META-INF/container.xml'))
         rootfile = container.find('.//{*}rootfile')
         if rootfile is None:
@@ -104,12 +107,30 @@ def validate_epub(path):
         spine = opf.findall('./{*}spine/{*}itemref')
         if not spine:
             raise ValueError('EPUB has no reading order')
+        resource_types = {}
         for entry in manifest.values():
             target = resource(str(PurePosixPath(opf_path).parent), entry.attrib['href'])
+            resource_types.setdefault(target, set()).add(entry.get('media-type'))
             if target not in z.namelist():
                 raise ValueError('Missing EPUB resource: ' + target)
             if target.endswith('.unknown') or z.read(target) == b'\xa0\xa0\xa0\xa0':
                 raise ValueError('Unresolved Kindle image placeholder: ' + target)
+        if 'META-INF/encryption.xml' in z.namelist():
+            enc = ET.fromstring(z.read('META-INF/encryption.xml'))
+            encrypted = enc.findall('.//{*}EncryptedData')
+            if not encrypted:
+                raise ValueError('EPUB encryption has no resource declarations')
+            for declaration in encrypted:
+                methods = declaration.findall('./{*}EncryptionMethod')
+                references = declaration.findall('./{*}CipherData/{*}CipherReference')
+                if (len(methods) != 1 or methods[0].get('Algorithm') not in FONT_ALGORITHMS
+                        or len(references) != 1):
+                    raise ValueError('EPUB still contains encrypted resources')
+                # CipherReference URIs are relative to the container root, not META-INF.
+                target = resource('', references[0].get('URI', ''))
+                media_types = resource_types.get(target, set())
+                if not media_types or not media_types.issubset(FONT_MEDIA_TYPES):
+                    raise ValueError('EPUB obfuscation target is not a manifest font: ' + target)
         for entry in spine:
             item = manifest.get(entry.attrib['idref'])
             if item is None:
