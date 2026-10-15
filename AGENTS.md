@@ -58,3 +58,13 @@ When automated tests are warranted, keep them close to the utility and document 
 ## Git workflow
 
 Use focused branches and pull requests for substantive changes. Keep unrelated utilities out of the same change unless the change is intentionally repository-wide.
+
+## Coding craft reference
+
+For implementation, repair, refactoring, and review, read
+`.agents/skills/coding-craft/SKILL.md` and its references. Keep the change contract
+compact, validate the risky behavior early, and review correctness and regressions
+before polish. Scale the workflow to the task and preserve all platform requirements
+above. This is a snapshot from `gevanoff/craft-playbooks` version 1.0.0; update the
+source collection before explicitly refreshing it. The reference adds no merge,
+deployment, or unrelated publication authority.
