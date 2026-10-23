@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 function Assert-Exit([string]$Label) {
-    if ($LASTEXITCODE -ne 0) { throw "$Label failed (exit $LASTEXITCODE)" }
+    if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw "$Label failed (exit $LASTEXITCODE)" }
 }
 Push-Location $root
 try {
