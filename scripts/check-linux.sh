@@ -33,7 +33,7 @@ exit 0
 EOF
 chmod +x "$venv/bin/python"
 CAPTURE="$scratch/root-capture.txt" HOME="$test_home" XDG_DATA_HOME="$data" "$test_home/.local/bin/droidrun"
-grep -Fx "$PWD" "$scratch/root-capture.txt"
+grep -Fx "$(pwd -P)" "$scratch/root-capture.txt"
 QT_QPA_PLATFORM=offscreen .venv/bin/python -c "from PySide6.QtWidgets import QApplication; from android_build_install_linux.app import MainWindow; app=QApplication([]); w=MainWindow(); w.close()"
 temp_project="$scratch/project path"
 temp_config="$scratch/config path"
