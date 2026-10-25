@@ -14,6 +14,7 @@ if ! .venv/bin/python -c 'import sys; assert sys.version_info[:2] == (3, 12)'; t
   echo "Stale DroidRun Linux venv: .venv must use Python 3.12; recreate it" >&2
   exit 2
 fi
+bash "$ROOT/scripts/test-runtime-guards.sh"
 .venv/bin/python -m pip install -e .
 .venv/bin/python -m py_compile android_build_install_linux/*.py
 bash -n droidrun install-desktop.sh
