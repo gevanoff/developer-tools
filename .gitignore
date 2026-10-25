@@ -1,0 +1,5 @@
+# Local validation artifacts
+**/__pycache__/
+**/*.py[cod]
+**/*.egg-info/
+tools/DroidRun-Linux/.venv/

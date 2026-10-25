@@ -61,7 +61,7 @@ node --test tests/read-usage.test.mjs
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\CodexMeter.ps1 -SelfTest
 ```
 
-Tests exercise the real stdio transport with a fake child process, paths containing spaces, missing executable, timeouts, early exit, malformed/error responses, legacy-option fallback, bounded output, numeric validation, nested account-data filtering, multiple windows, unknown values, stale/blocked status, expired countdowns, and collapse/restore. The Windows CI workflow runs these tests.
+Tests exercise the real stdio transport with a fake child process, paths containing spaces, missing executable, timeouts, early exit, malformed/error responses, legacy-option fallback, bounded output, numeric validation, nested account-data filtering, multiple windows, unknown values, stale/blocked status, expired countdowns, and collapse/restore. Run these tests locally using `scripts/check-windows.ps1` from the repository root.
 
 Optional authenticated check (one read; opens and then closes the test panel):
 
