@@ -2,8 +2,18 @@
 set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/tools/DroidRun-Linux"
-PYTHON="${PYTHON:-python3}"
+PYTHON="${PYTHON:-python3.12}"
+# Match the 3.12 Linux workflow that this local runner replaces. A reused
+# environment must be checked separately: PYTHON may have changed since setup.
+if ! "$PYTHON" -c 'import sys; assert sys.version_info[:2] == (3, 12)'; then
+  echo "Python 3.12 required; set PYTHON to a Python 3.12 executable" >&2
+  exit 2
+fi
 if [[ ! -x .venv/bin/python ]]; then "$PYTHON" -m venv .venv; fi
+if ! .venv/bin/python -c 'import sys; assert sys.version_info[:2] == (3, 12)'; then
+  echo "Stale DroidRun Linux venv: .venv must use Python 3.12; recreate it" >&2
+  exit 2
+fi
 .venv/bin/python -m pip install -e .
 .venv/bin/python -m py_compile android_build_install_linux/*.py
 bash -n droidrun install-desktop.sh
