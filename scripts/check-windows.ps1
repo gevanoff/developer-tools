@@ -6,6 +6,18 @@ function Assert-Exit([string]$Label) {
 }
 Push-Location $root
 try {
+    # Match the explicit Windows workflow runtimes, rather than testing whatever
+    # node/python happens to be first on PATH and reporting a misleading pass.
+    $nodeVersion = (& node --version)
+    Assert-Exit 'Node version probe'
+    if ($nodeVersion -notmatch '^v22[.]') {
+        throw "Node 22 required for Windows validation; found: $nodeVersion"
+    }
+    $pythonVersion = (& python --version)
+    Assert-Exit 'Python version probe'
+    if ($pythonVersion -notmatch '^Python 3[.]11([.]|$)') {
+        throw "Python 3.11 required for Windows validation; found: $pythonVersion"
+    }
     Push-Location (Join-Path $root 'tools/DroidRun')
     try {
         & ./Test-AndroidBuildBackends.ps1
