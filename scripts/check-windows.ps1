@@ -29,6 +29,14 @@ try {
     try {
         & node --test tests/read-usage.test.mjs
         Assert-Exit 'Codex usage Node tests'
+        # PR #29 adds this recovery contract. Replacing its GitHub Actions
+        # workflow must not silently discard executable upgrade/retry coverage.
+        $recoveryTest = Join-Path (Get-Location).Path 'tests/recovery.test.ps1'
+        if (-not (Test-Path -LiteralPath $recoveryTest -PathType Leaf)) {
+            throw "Required Codex meter recovery regression missing: $recoveryTest"
+        }
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $recoveryTest
+        Assert-Exit 'Codex meter recovery tests'
         & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File ./CodexMeter.ps1 -SelfTest
         Assert-Exit 'Codex meter self test'
     } finally { Pop-Location }
