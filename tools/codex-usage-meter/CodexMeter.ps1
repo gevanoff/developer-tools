@@ -1,4 +1,4 @@
-param([switch]$SelfTest,[switch]$LiveTest,[string]$CodexPath,[string]$PreviewPath,[ValidateSet('Mini','Compact','Standard','Large')][string]$Layout='Standard')
+param([switch]$SelfTest,[switch]$LiveTest,[string]$CodexPath,[string]$CodexBinRoot,[string]$PreviewPath,[ValidateSet('Mini','Compact','Standard','Large')][string]$Layout='Standard')
 $ErrorActionPreference = 'Stop'
 $taskkillPath = Join-Path ([Environment]::SystemDirectory) 'taskkill.exe'
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
@@ -14,12 +14,15 @@ $script:worker = $null
 $script:snapshot = $null
 $script:lastError = $null
 $script:nextRefresh = [DateTime]::MinValue
+$script:failures = 0
 $script:quitting = $false
+. (Join-Path $PSScriptRoot 'Recovery.ps1')
 if(!$SelfTest){
  try {
   $nodePath = (Get-Command node.exe -ErrorAction Stop).Source
-  if(!$CodexPath){$CodexPath = (Get-Command codex.exe -ErrorAction Stop).Source}
-  if(!(Test-Path -LiteralPath $CodexPath -PathType Leaf)){throw 'Codex executable not found'}
+  if($CodexBinRoot){$CodexPath = Find-DesktopCodex $CodexBinRoot}
+  elseif(!$CodexPath){$CodexPath = (Get-Command codex.exe -ErrorAction Stop).Source}
+  if(!$CodexPath -or !(Test-Path -LiteralPath $CodexPath -PathType Leaf)){throw 'Codex executable not found'}
  } catch {
   [void][Windows.Forms.MessageBox]::Show('Install Node.js and make codex.exe available on PATH, then sign in to Codex. See README.md for setup and the -CodexPath option.','Codex meter setup')
   $mutex.ReleaseMutex();$mutex.Dispose();exit 1
@@ -81,6 +84,10 @@ $dashboard.Add_Click({Start-Process 'https://chatgpt.com/codex/settings/usage'})
 $form.Add_FormClosing({param($s,$e) if(!$script:quitting -and $e.CloseReason -eq 'UserClosing'){$e.Cancel=$true; $form.Hide()}})
 function Start-Refresh {
  if($script:worker){return}
+ if($CodexBinRoot -and (!(Test-Path -LiteralPath $CodexPath -PathType Leaf) -or $script:failures -ge 3)){
+  $candidate=Find-DesktopCodex $CodexBinRoot
+  if($candidate){$script:CodexPath=$candidate}
+ }
  $info=New-Object Diagnostics.ProcessStartInfo
  $info.FileName=$nodePath
  $info.Arguments='"'+(Join-Path $PSScriptRoot 'read-usage.mjs')+'" "'+$codexPath+'"'
@@ -91,7 +98,7 @@ function Start-Refresh {
  try { [void]$script:worker.Start() } catch {
   $script:worker.Dispose();$script:worker=$null
   $script:lastError='Cannot start usage reader. Check Node.js installation.'
-  $script:nextRefresh=[DateTime]::UtcNow.AddMinutes(5)
+  Register-RefreshFailure
   return
  }
  $script:outTask=$script:worker.StandardOutput.ReadToEndAsync()
@@ -158,16 +165,16 @@ $timer.Add_Tick({
    $data=$script:outTask.Result | ConvertFrom-Json
    if($data.error){throw $data.error}
    if(!$data.checkedAt -or !$data.rateLimits){throw 'Invalid response'}
-   $script:snapshot=$data; $script:lastError=$null
-  }catch{$script:lastError='Usage unavailable. Check Codex sign-in or connection.'}
+   $script:snapshot=$data; $script:lastError=$null;$script:failures=0
+   $script:nextRefresh=[DateTime]::UtcNow.AddMinutes(5)
+  }catch{$script:lastError='Usage unavailable. Check Codex sign-in or connection.';Register-RefreshFailure}
   $script:worker.Dispose();$script:worker=$null;$refresh.Enabled=$true
-  $script:nextRefresh=[DateTime]::UtcNow.AddMinutes(5)
  }
  if($script:worker -and ([DateTime]::UtcNow-$script:started).TotalSeconds -gt 35){
   if(!$script:worker.HasExited){& $taskkillPath /PID $script:worker.Id /T /F 2>$null | Out-Null}
   $script:worker.Dispose();$script:worker=$null;$refresh.Enabled=$true
   $script:lastError='Usage refresh timed out. Retry shortly.'
-  $script:nextRefresh=[DateTime]::UtcNow.AddMinutes(5)
+  Register-RefreshFailure
  }
  if(!$script:worker -and [DateTime]::UtcNow -ge $script:nextRefresh){Start-Refresh}
  Render
