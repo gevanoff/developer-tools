@@ -26,6 +26,14 @@ For an executable outside `PATH`:
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\CodexMeter.ps1 -CodexPath "C:\path with spaces\codex.exe"
 ```
 
+For automatic recovery when the Codex desktop app replaces its versioned executable, pass its installation's `bin` directory instead of `-CodexPath`:
+
+```powershell
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\CodexMeter.ps1 -CodexBinRoot "$env:LOCALAPPDATA\OpenAI\Codex\bin"
+```
+
+The meter looks for the newest `codex.exe` in the immediate version directories. It checks again if the selected file disappears or after three consecutive failed refreshes. An explicit `-CodexPath` stays fixed; `-CodexBinRoot` enables desktop discovery.
+
 The execution-policy option applies to this process only. No administrator access, installation, scheduled AI task, or startup registration is required. If downloaded files are blocked, inspect them and use Windows file Properties > Unblock where available; organizational policy can still prevent running scripts.
 
 ## Controls and readings
@@ -42,7 +50,7 @@ Right-click the panel or tray icon and select **Panel size**: **Mini** (240x205)
 
 The panel shows the remaining percentage, countdown to each reported automatic reset, available reset count, and last successful refresh. When two allowance windows apply, the headline uses the lower remaining percentage. Available resets are separate from the scheduled automatic reset; the meter never consumes one.
 
-It refreshes every five minutes even while hidden. Failed updates retain the previous reading with a stale warning. Missing values are shown as unknown rather than zero. An expired countdown waits for a server refresh instead of assuming that your allowance has reset. A server-reported block is displayed even if a percentage remains positive.
+It refreshes every five minutes even while hidden. After consecutive failures it retries after 30 seconds, one minute, and two minutes, continuing at two-minute intervals until a refresh succeeds. Success restores the five-minute interval. Failed updates retain the previous reading with a stale warning. Missing values are shown as unknown rather than zero. An expired countdown waits for a server refresh instead of assuming that your allowance has reset. A server-reported block is displayed even if a percentage remains positive.
 
 ## Usage cost and privacy
 
@@ -58,6 +66,7 @@ No account, credentials, npm install, or model calls are needed for offline test
 
 ```powershell
 node --test tests/read-usage.test.mjs
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/recovery.test.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\CodexMeter.ps1 -SelfTest
 ```
 
