@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: droidrun-linux
+Version: 0.1.0
+Summary: Ubuntu/Linux Android build, sync, install, and launch dashboard.
+Requires-Python: >=3.10
+Requires-Dist: PySide6>=6.7

@@ -1,0 +1,16 @@
+README.md
+pyproject.toml
+android_build_install_linux/__init__.py
+android_build_install_linux/app.py
+android_build_install_linux/backends.py
+android_build_install_linux/core.py
+android_build_install_linux/assets/droidrun-icon.png
+droidrun_linux.egg-info/PKG-INFO
+droidrun_linux.egg-info/SOURCES.txt
+droidrun_linux.egg-info/dependency_links.txt
+droidrun_linux.egg-info/entry_points.txt
+droidrun_linux.egg-info/requires.txt
+droidrun_linux.egg-info/top_level.txt
+tests/test_backends.py
+tests/test_core.py
+tests/test_desktop_install.py

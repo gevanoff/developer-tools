@@ -1,0 +1,2 @@
+[console_scripts]
+droidrun = android_build_install_linux.app:main
