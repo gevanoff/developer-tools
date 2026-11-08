@@ -7,13 +7,15 @@ param(
     [Parameter(DontShow = $true)][switch]$UiSmokeTestCancellation,
     [Parameter(DontShow = $true)][switch]$UiSmokeTestStatusRefresh,
     [Parameter(DontShow = $true)][switch]$UiSmokeTestInheritedOutput,
-    [Parameter(DontShow = $true)][string]$UiSmokeTestApkPath
+    [Parameter(DontShow = $true)][string]$UiSmokeTestApkPath,
+    [Parameter(DontShow = $true)][string]$UiSmokeTestPreviewPath
 )
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 . (Join-Path $PSScriptRoot 'WindowsTaskbarIdentity.ps1')
+. (Join-Path $PSScriptRoot 'DroidRunTheme.ps1')
 [System.Windows.Forms.Application]::EnableVisualStyles()
 $isUiSmokeTest = $UiSmokeTest -or $UiSmokeTestOperation -or $UiSmokeTestOperationSuccess -or
     $UiSmokeTestCancellation -or $UiSmokeTestStatusRefresh -or $UiSmokeTestInheritedOutput -or $UiSmokeTestApkPath
@@ -331,7 +333,7 @@ function Show-Reports {
     param([System.Windows.Forms.IWin32Window]$Owner)
 
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = 'DroidRun - Reports'
+    $form.Text = 'Reports - DroidRun'
     $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
     if ($null -ne $appIcon) { $form.Icon = $appIcon }
     $form.StartPosition = if ($null -ne $Owner) {
@@ -339,62 +341,75 @@ function Show-Reports {
     } else {
         [System.Windows.Forms.FormStartPosition]::CenterScreen
     }
-    $form.ClientSize = New-Object System.Drawing.Size(880, 440)
+    $form.ClientSize = New-Object System.Drawing.Size(880, 460)
     $form.MinimumSize = New-Object System.Drawing.Size(640, 400)
     $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::Sizable
     $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
-    $label = New-Object System.Windows.Forms.Label
-    $label.Text = 'Recent build/install reports:'
-    $label.AutoSize = $true
-    $label.Location = New-Object System.Drawing.Point(16, 16)
-    $form.Controls.Add($label)
+    [DroidRun.Theme]::ApplyForm($form)
 
-    $list = New-Object System.Windows.Forms.ListView
-    $list.Location = New-Object System.Drawing.Point(16, 46)
-    $list.Size = New-Object System.Drawing.Size(848, 326)
-    $list.View = [System.Windows.Forms.View]::Details
-    $list.FullRowSelect = $true
-    $list.GridLines = $true
-    $list.MultiSelect = $false
-    $list.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
+    $label = [DroidRun.Theme]::NewLabel('Build and install reports', 11, [System.Drawing.FontStyle]::Bold, [DroidRun.Theme]::Text)
+    $label.SetBounds(16, 12, 600, 26)
+    $form.Controls.Add($label)
+    $hint = [DroidRun.Theme]::NewLabel('Newest first. Open a report to read the full Gradle and ADB output.', 9, [System.Drawing.FontStyle]::Regular, [DroidRun.Theme]::Muted)
+    $hint.SetBounds(16, 38, 760, 20)
+    $hint.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+    $form.Controls.Add($hint)
+
+    $list = New-Object DroidRun.StatusListView
+    $list.AccessibleName = 'Reports'
+    $list.RowHeight = 30
+    [void]$list.AddColumn('Run', 155, [DroidRun.CellKind]::Text)
+    [void]$list.AddColumn('Result', 110, [DroidRun.CellKind]::Chip)
+    [void]$list.AddColumn('Project', 180, [DroidRun.CellKind]::Text)
+    [void]$list.AddColumn('Report file', 400, [DroidRun.CellKind]::Muted)
+    $frame = [DroidRun.BorderHost]::new($list)
+    $frame.SetBounds(16, 66, 848, 330)
+    $frame.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
         [System.Windows.Forms.AnchorStyles]::Bottom -bor
         [System.Windows.Forms.AnchorStyles]::Left -bor
         [System.Windows.Forms.AnchorStyles]::Right
-    [void]$list.Columns.Add('Run', 155)
-    [void]$list.Columns.Add('Result', 85)
-    [void]$list.Columns.Add('Project', 180)
-    [void]$list.Columns.Add('Report file', 400)
-    $form.Controls.Add($list)
+    $form.Controls.Add($frame)
+
+    $empty = [DroidRun.Theme]::NewLabel('No reports yet. A report is saved each time Build & Install, Install APK, or a Sync & Run build runs.', 10, [System.Drawing.FontStyle]::Regular, [DroidRun.Theme]::Muted)
+    $empty.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+    $empty.BackColor = [DroidRun.Theme]::Surface
+    $empty.Bounds = $frame.Bounds
+    $empty.Anchor = $frame.Anchor
+    $empty.Visible = $false
+    $form.Controls.Add($empty)
+    $empty.BringToFront()
 
     foreach ($file in @(Get-ChildItem -LiteralPath $logRoot -Filter 'android-build-install-*.log' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)) {
         $summary = Get-LogSummary -File $file
         $item = New-Object System.Windows.Forms.ListViewItem($summary.Time)
-        [void]$item.SubItems.Add($summary.Status)
+        $result = $item.SubItems.Add($summary.Status)
+        $resultTone = switch ($summary.Status) { 'Success' { 'ok' } 'Failed' { 'error' } default { 'warn' } }
+        $result.Tag = [DroidRun.ChipCell]::new($resultTone, '')
         [void]$item.SubItems.Add($summary.Project)
         [void]$item.SubItems.Add((Split-Path -Leaf $summary.Path))
         $item.Tag = $summary.Path
+        $item.ToolTipText = $summary.Path
         [void]$list.Items.Add($item)
     }
+    $list.ShowItemToolTips = $true
+    $empty.Visible = ($list.Items.Count -eq 0)
 
-    $open = New-Object System.Windows.Forms.Button
-    $open.Text = 'Open Report'
-    $open.Size = New-Object System.Drawing.Size(120, 32)
-    $open.Location = New-Object System.Drawing.Point(16, 392)
+    $open = New-DroidRunButton -Text '&Open Report' -Kind Primary
+    $open.Size = New-Object System.Drawing.Size(130, 34)
+    $open.Location = New-Object System.Drawing.Point(16, 410)
     $open.Enabled = $false
     $open.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left
     $form.Controls.Add($open)
 
-    $folder = New-Object System.Windows.Forms.Button
-    $folder.Text = 'Open Reports Folder'
-    $folder.Size = New-Object System.Drawing.Size(150, 32)
-    $folder.Location = New-Object System.Drawing.Point(146, 392)
+    $folder = New-DroidRunButton -Text 'Open Reports &Folder' -Kind Secondary
+    $folder.Size = New-Object System.Drawing.Size(160, 34)
+    $folder.Location = New-Object System.Drawing.Point(154, 410)
     $folder.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left
     $form.Controls.Add($folder)
 
-    $close = New-Object System.Windows.Forms.Button
-    $close.Text = 'Close'
-    $close.Size = New-Object System.Drawing.Size(100, 32)
-    $close.Location = New-Object System.Drawing.Point(764, 392)
+    $close = New-DroidRunButton -Text 'Close' -Kind Secondary
+    $close.Size = New-Object System.Drawing.Size(100, 34)
+    $close.Location = New-Object System.Drawing.Point(764, 410)
     $close.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     $close.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
     $form.Controls.Add($close)
@@ -402,8 +417,8 @@ function Show-Reports {
 
     $list.Add_SelectedIndexChanged({ $open.Enabled = ($list.SelectedItems.Count -eq 1) })
     $list.Add_Resize({
-        $fixedWidth = 155 + 85 + 180
-        $list.Columns[3].Width = [Math]::Max(150, $list.ClientSize.Width - $fixedWidth - 8)
+        $fixedWidth = 155 + 110 + 180
+        $list.Columns[3].Width = [Math]::Max(150, $list.ClientSize.Width - $fixedWidth - 2)
     })
     $openReport = {
         if ($list.SelectedItems.Count -ne 1) { return }
@@ -419,6 +434,7 @@ function Show-Reports {
     if ($list.Items.Count -gt 0) { $list.Items[0].Selected = $true }
     if ($null -ne $Owner) { [void]$form.ShowDialog($Owner) }
     else { [void]$form.ShowDialog() }
+    $form.Dispose()
 }
 
 function Get-StatusResults {
@@ -440,22 +456,32 @@ function Get-StatusResults {
 }
 
 function Show-DeviceScan {
-    param([System.Windows.Forms.IWin32Window]$Owner)
+    param(
+        [System.Windows.Forms.IWin32Window]$Owner,
+        [scriptblock]$OnProgress
+    )
 
     $projects = @(Get-SavedProjects)
     if ($projects.Count -eq 0) {
-        [System.Windows.Forms.MessageBox]::Show($Owner, 'Add at least one Android project before scanning the device.', 'Android Device Scan') | Out-Null
+        [System.Windows.Forms.MessageBox]::Show($Owner, 'Add at least one Android project before scanning the device.', 'Device scan - DroidRun') | Out-Null
         return
     }
 
+    # The scan runs in this process; show that the dashboard is busy rather than frozen.
+    if ($OnProgress) { & $OnProgress "Scanning the device for $($projects.Count) project(s)..." }
+    $previousCursor = [System.Windows.Forms.Cursor]::Current
+    [System.Windows.Forms.Cursor]::Current = [System.Windows.Forms.Cursors]::WaitCursor
     try { $results = @(Get-StatusResults -Projects $projects) }
     catch {
-        [System.Windows.Forms.MessageBox]::Show($Owner, $_.Exception.Message, 'Android Device Scan') | Out-Null
+        if ($OnProgress) { & $OnProgress 'Device scan failed.' }
+        [System.Windows.Forms.MessageBox]::Show($Owner, $_.Exception.Message, 'Device scan - DroidRun') | Out-Null
         return
     }
+    finally { [System.Windows.Forms.Cursor]::Current = $previousCursor }
+    if ($OnProgress) { & $OnProgress "Device scanned at $(Get-Date -Format 'HH:mm:ss')." }
 
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = 'DroidRun - Device Scan'
+    $form.Text = 'Device scan - DroidRun'
     $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
     if ($null -ne $appIcon) { $form.Icon = $appIcon }
     $form.StartPosition = if ($null -ne $Owner) {
@@ -463,56 +489,61 @@ function Show-DeviceScan {
     } else {
         [System.Windows.Forms.FormStartPosition]::CenterScreen
     }
-    $form.ClientSize = New-Object System.Drawing.Size(1120, 500)
+    $form.ClientSize = New-Object System.Drawing.Size(1120, 520)
     $form.MinimumSize = New-Object System.Drawing.Size(720, 440)
     $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::Sizable
     $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
+    [DroidRun.Theme]::ApplyForm($form)
 
-    $hint = New-Object System.Windows.Forms.Label
-    $hint.Text = 'Each project uses its remembered device when configured. Same/Different is an exact SHA-256 APK comparison.'
-    $hint.AutoSize = $true
-    $hint.Location = New-Object System.Drawing.Point(16, 18)
+    $title = [DroidRun.Theme]::NewLabel('Device scan', 11, [System.Drawing.FontStyle]::Bold, [DroidRun.Theme]::Text)
+    $title.SetBounds(16, 12, 400, 26)
+    $form.Controls.Add($title)
+    $hint = [DroidRun.Theme]::NewLabel('Read-only: nothing was built or installed. Each project uses its remembered device when set. Same and Different are exact SHA-256 comparisons.', 9, [System.Drawing.FontStyle]::Regular, [DroidRun.Theme]::Muted)
+    $hint.SetBounds(16, 38, 1088, 20)
+    $hint.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
     $form.Controls.Add($hint)
 
-    $list = New-Object System.Windows.Forms.ListView
-    $list.Location = New-Object System.Drawing.Point(16, 48)
-    $list.Size = New-Object System.Drawing.Size(1088, 378)
-    $list.View = [System.Windows.Forms.View]::Details
-    $list.FullRowSelect = $true
-    $list.GridLines = $true
-    $list.MultiSelect = $false
-    $list.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
+    $list = New-Object DroidRun.StatusListView
+    $list.AccessibleName = 'Device scan results'
+    $list.RowHeight = 44
+    $list.ShowItemToolTips = $true
+    [void]$list.AddColumn('Project', 220, [DroidRun.CellKind]::Project)
+    [void]$list.AddColumn('Device', 190, [DroidRun.CellKind]::Text)
+    [void]$list.AddColumn('Status', 150, [DroidRun.CellKind]::Chip)
+    [void]$list.AddColumn('Detail', 500, [DroidRun.CellKind]::Muted)
+    $frame = [DroidRun.BorderHost]::new($list)
+    $frame.SetBounds(16, 66, 1088, 384)
+    $frame.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
         [System.Windows.Forms.AnchorStyles]::Bottom -bor
         [System.Windows.Forms.AnchorStyles]::Left -bor
         [System.Windows.Forms.AnchorStyles]::Right
-    [void]$list.Columns.Add('Project', 180)
-    [void]$list.Columns.Add('Device', 190)
-    [void]$list.Columns.Add('Status', 130)
-    [void]$list.Columns.Add('Detail', 560)
-    $form.Controls.Add($list)
+    $form.Controls.Add($frame)
     $list.Add_Resize({
-        $fixedWidth = 180 + 190 + 130
-        $list.Columns[3].Width = [Math]::Max(180, $list.ClientSize.Width - $fixedWidth - 8)
+        $fixedWidth = 220 + 190 + 150
+        $list.Columns[3].Width = [Math]::Max(180, $list.ClientSize.Width - $fixedWidth - 2)
     })
 
     foreach ($result in $results) {
         $item = New-Object System.Windows.Forms.ListViewItem([string]$result.Project)
+        $item.Tag = [string]$result.ProjectPath
         [void]$item.SubItems.Add([string]$result.Device)
-        [void]$item.SubItems.Add([string]$result.DeviceStatus)
+        $status = $item.SubItems.Add([string]$result.DeviceStatus)
+        $status.Tag = New-DroidRunChipCell -Status ([string]$result.DeviceStatus)
         [void]$item.SubItems.Add([string]$result.DeviceDetail)
+        $item.ToolTipText = [string]$result.DeviceDetail
         [void]$list.Items.Add($item)
     }
 
-    $close = New-Object System.Windows.Forms.Button
-    $close.Text = 'Close'
-    $close.Size = New-Object System.Drawing.Size(100, 32)
-    $close.Location = New-Object System.Drawing.Point(1004, 450)
+    $close = New-DroidRunButton -Text 'Close' -Kind Secondary
+    $close.Size = New-Object System.Drawing.Size(100, 34)
+    $close.Location = New-Object System.Drawing.Point(1004, 468)
     $close.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     $close.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
     $form.Controls.Add($close)
     $form.CancelButton = $close
     if ($null -ne $Owner) { [void]$form.ShowDialog($Owner) }
     else { [void]$form.ShowDialog() }
+    $form.Dispose()
 }
 
 function Invoke-ProjectSettings {
@@ -555,187 +586,41 @@ function Select-SavedProjectAction {
         })
     }
 
-    $title = New-Object System.Windows.Forms.Label
-    $title.Text = 'Android project dashboard'
-    $title.AutoSize = $true
-    $title.Location = New-Object System.Drawing.Point(16, 16)
-    $form.Controls.Add($title)
+    $logoImage = $null
+    $logoPath = Join-Path $PSScriptRoot 'assets\droidrun-icon.png'
+    if (Test-Path -LiteralPath $logoPath -PathType Leaf) {
+        try { $logoImage = [System.Drawing.Image]::FromFile($logoPath) } catch { $logoImage = $null }
+    }
 
-    $statusTimestamp = New-Object System.Windows.Forms.Label
-    $statusTimestamp.Text = 'Status not checked.'
-    $statusTimestamp.AutoSize = $false
-    $statusTimestamp.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
-    $statusTimestamp.Location = New-Object System.Drawing.Point(914, 12)
-    $statusTimestamp.Size = New-Object System.Drawing.Size(250, 24)
-    $form.Controls.Add($statusTimestamp)
-
-    $hint = New-Object System.Windows.Forms.Label
-    $hint.Text = 'Sync & Run updates Git safely, rebuilds and installs only when needed, then launches according to project settings.'
-    $hint.AutoSize = $false
-    $hint.AutoEllipsis = $true
-    $hint.Location = New-Object System.Drawing.Point(16, 42)
-    $hint.Size = New-Object System.Drawing.Size(1148, 20)
-    $form.Controls.Add($hint)
-
-    $list = New-Object System.Windows.Forms.ListView
-    $list.Location = New-Object System.Drawing.Point(16, 72)
-    $list.Size = New-Object System.Drawing.Size(1148, 370)
-    $list.View = [System.Windows.Forms.View]::Details
-    $list.FullRowSelect = $true
-    $list.GridLines = $true
-    $list.MultiSelect = $false
-    $list.ShowItemToolTips = $true
-    [void]$list.Columns.Add('Project', 170)
-    [void]$list.Columns.Add('Git', 280)
-    [void]$list.Columns.Add('Local Build', 130)
-    [void]$list.Columns.Add('Device', 130)
-    [void]$list.Columns.Add('Path', 590)
-    [void]$list.Columns.Add('Checked', 90)
-    $list.TabIndex = 0
-    $form.Controls.Add($list)
-
-    $summary = New-Object System.Windows.Forms.Label
-    $summary.Text = 'Select a project to see its settings.'
-    $summary.AutoSize = $false
-    $summary.AutoEllipsis = $true
-    $summary.Location = New-Object System.Drawing.Point(16, 454)
-    $summary.Size = New-Object System.Drawing.Size(1148, 40)
-    $form.Controls.Add($summary)
-
-    $operationGroup = New-Object System.Windows.Forms.GroupBox
-    $operationGroup.Text = 'Operation output'
-    $operationGroup.Location = New-Object System.Drawing.Point(16, 502)
-    $operationGroup.Size = New-Object System.Drawing.Size(1148, 180)
-    $operationGroup.TabStop = $false
-    $form.Controls.Add($operationGroup)
-
-    $operationProgress = New-Object System.Windows.Forms.ProgressBar
-    $operationProgress.Location = New-Object System.Drawing.Point(12, 24)
-    $operationProgress.Size = New-Object System.Drawing.Size(150, 18)
-    $operationProgress.Style = [System.Windows.Forms.ProgressBarStyle]::Marquee
-    $operationProgress.MarqueeAnimationSpeed = 30
-    $operationProgress.Visible = $false
-    $operationGroup.Controls.Add($operationProgress)
-
-    $operationStatus = New-Object System.Windows.Forms.Label
-    $operationStatus.Text = 'Ready.'
-    $operationStatus.AutoSize = $false
-    $operationStatus.AutoEllipsis = $true
-    $operationStatus.Location = New-Object System.Drawing.Point(12, 23)
-    $operationStatus.Size = New-Object System.Drawing.Size(860, 20)
-    $operationGroup.Controls.Add($operationStatus)
-
-    $copyOutput = New-Object System.Windows.Forms.Button
-    $copyOutput.Text = '&Copy Output'
-    $copyOutput.Size = New-Object System.Drawing.Size(110, 28)
-    $copyOutput.Location = New-Object System.Drawing.Point(926, 18)
+    # DroidRunUi.cs builds, themes, and lays out the controls; this script wires behaviour.
+    $view = [DroidRun.DashboardView]::new($form, $logoImage)
+    $statusTimestamp = $view.StatusTimestamp
+    $list = $view.Projects
+    $operationStatus = $view.OperationStatus
+    $copyOutput = $view.CopyOutput
+    $cancelOperation = $view.CancelOperation
+    $operationOutput = $view.OperationOutput
+    $add = $view.Add
+    $remove = $view.Remove
+    $reports = $view.Reports
+    $scan = $view.Scan
+    $refresh = $view.Refresh
+    $gitPull = $view.GitPull
+    $installApk = $view.InstallApk
+    $settings = $view.Settings
+    $sync = $view.Sync
+    $build = $view.Build
     $copyOutput.Enabled = $false
-    $copyOutput.TabIndex = 11
-    $operationGroup.Controls.Add($copyOutput)
-
-    $cancelOperation = New-Object System.Windows.Forms.Button
-    $cancelOperation.Text = '&Cancel'
-    $cancelOperation.Size = New-Object System.Drawing.Size(90, 28)
-    $cancelOperation.Location = New-Object System.Drawing.Point(1046, 18)
     $cancelOperation.Enabled = $false
-    $cancelOperation.TabIndex = 12
-    $operationGroup.Controls.Add($cancelOperation)
-
-    $operationOutput = New-Object System.Windows.Forms.RichTextBox
-    $operationOutput.Location = New-Object System.Drawing.Point(12, 52)
-    $operationOutput.Size = New-Object System.Drawing.Size(1124, 116)
-    $operationOutput.ReadOnly = $true
-    $operationOutput.BackColor = [System.Drawing.SystemColors]::Window
-    $operationOutput.Font = New-Object System.Drawing.Font('Consolas', 9)
-    $operationOutput.WordWrap = $false
-    $operationOutput.DetectUrls = $false
-    $operationOutput.HideSelection = $false
-    $operationOutput.TabIndex = 10
-    $operationGroup.Controls.Add($operationOutput)
-
-    $add = New-Object System.Windows.Forms.Button
-    $add.Text = '&Add...'
-    $add.Size = New-Object System.Drawing.Size(90, 32)
-    $add.Location = New-Object System.Drawing.Point(16, 642)
-    $add.TabIndex = 6
-    $form.Controls.Add($add)
-
-    $remove = New-Object System.Windows.Forms.Button
-    $remove.Text = '&Remove'
-    $remove.Size = New-Object System.Drawing.Size(90, 32)
-    $remove.Location = New-Object System.Drawing.Point(112, 642)
-    $remove.Enabled = $false
-    $remove.TabIndex = 7
-    $form.Controls.Add($remove)
-
-    $reports = New-Object System.Windows.Forms.Button
-    $reports.Text = 'Re&ports...'
-    $reports.Size = New-Object System.Drawing.Size(100, 32)
-    $reports.Location = New-Object System.Drawing.Point(16, 682)
-    $reports.TabIndex = 8
-    $form.Controls.Add($reports)
-
-    $scan = New-Object System.Windows.Forms.Button
-    $scan.Text = 'Scan &Device...'
-    $scan.Size = New-Object System.Drawing.Size(115, 32)
-    $scan.Location = New-Object System.Drawing.Point(122, 682)
-    $scan.TabIndex = 9
-    $form.Controls.Add($scan)
-
-    $refresh = New-Object System.Windows.Forms.Button
-    $refresh.Text = 'Re&fresh Status'
-    $refresh.Size = New-Object System.Drawing.Size(115, 32)
-    $refresh.Location = New-Object System.Drawing.Point(243, 682)
-    $refresh.TabIndex = 3
-    $form.Controls.Add($refresh)
-
-    $gitPull = New-Object System.Windows.Forms.Button
-    $gitPull.Text = '&Git Pull'
-    $gitPull.Size = New-Object System.Drawing.Size(90, 32)
-    $gitPull.Location = New-Object System.Drawing.Point(364, 682)
-    $gitPull.Enabled = $false
-    $gitPull.TabIndex = 4
-    $form.Controls.Add($gitPull)
-
-    $installApk = New-Object System.Windows.Forms.Button
-    $installApk.Text = 'Install &APK...'
-    $installApk.Size = New-Object System.Drawing.Size(120, 32)
-    $installApk.TabIndex = 14
-    $form.Controls.Add($installApk)
-
-    $settings = New-Object System.Windows.Forms.Button
-    $settings.Text = 'Se&ttings...'
-    $settings.Size = New-Object System.Drawing.Size(100, 32)
-    $settings.Location = New-Object System.Drawing.Point(208, 642)
-    $settings.Enabled = $false
-    $settings.TabIndex = 5
-    $form.Controls.Add($settings)
-
-    $sync = New-Object System.Windows.Forms.Button
-    $sync.Text = '&Sync && Run'
-    $sync.Size = New-Object System.Drawing.Size(130, 32)
-    $sync.Location = New-Object System.Drawing.Point(1034, 642)
-    $sync.Enabled = $false
-    $sync.TabIndex = 1
-    $form.Controls.Add($sync)
-
-    $build = New-Object System.Windows.Forms.Button
-    $build.Text = '&Build && Install'
-    $build.Size = New-Object System.Drawing.Size(130, 32)
-    $build.Location = New-Object System.Drawing.Point(896, 642)
-    $build.Enabled = $false
-    $build.TabIndex = 2
-    $form.Controls.Add($build)
-
-    $exit = New-Object System.Windows.Forms.Button
-    $exit.Text = 'E&xit'
-    $exit.Size = New-Object System.Drawing.Size(90, 32)
-    $exit.Location = New-Object System.Drawing.Point(1074, 682)
-    $exit.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-    $exit.TabIndex = 13
-    $form.Controls.Add($exit)
-    $form.CancelButton = $exit
     $form.AcceptButton = $sync
+
+    $toolTips = New-Object System.Windows.Forms.ToolTip
+    $toolTips.SetToolTip($sync, 'Pull, build, and install only what is needed, then launch (Enter or double-click a project).')
+    $toolTips.SetToolTip($build, 'Always build, then install and launch according to project settings.')
+    $toolTips.SetToolTip($gitPull, 'git pull --ff-only. Stops on local changes or a diverged branch.')
+    $toolTips.SetToolTip($installApk, 'Install an existing APK file without building or changing Git.')
+    $toolTips.SetToolTip($remove, 'Forget this project. The folder and its settings are not changed.')
+    $toolTips.SetToolTip($refresh, 'Fetch Git remotes and recheck builds and the device.')
 
     $trayIcon = $null
     $trayMenu = $null
@@ -772,67 +657,7 @@ function Select-SavedProjectAction {
         $trayExit.Add_Click({ $form.Close() })
     }
 
-    $layoutDashboard = {
-        $clientWidth = $form.ClientSize.Width
-        $clientHeight = $form.ClientSize.Height
-        $scale = [Math]::Max(1.0, ([double]$form.DeviceDpi / 96.0))
-        $margin = [int][Math]::Round(16 * $scale)
-        $gap = [int][Math]::Round(6 * $scale)
-        $right = $clientWidth - $margin
-        $secondButtonRow = $clientHeight - $margin - $exit.Height
-        $firstButtonRow = $secondButtonRow - $gap - $sync.Height
-        $operationHeight = [int][Math]::Round(180 * $scale)
-        $operationTop = $firstButtonRow - $gap - $operationHeight
-        $summaryHeight = [int][Math]::Round(36 * $scale)
-        $summaryTop = $operationTop - $gap - $summaryHeight
-        $listHeight = [Math]::Max([int][Math]::Round(220 * $scale), $summaryTop - $gap - $list.Top)
-
-        $hint.Width = [Math]::Max(100, $clientWidth - (2 * $margin))
-        $statusTimestamp.Location = New-Object System.Drawing.Point(($clientWidth - $margin - $statusTimestamp.Width), $statusTimestamp.Top)
-        $list.Size = New-Object System.Drawing.Size([Math]::Max(300, $clientWidth - (2 * $margin)), $listHeight)
-        $summary.Location = New-Object System.Drawing.Point($margin, ($list.Bottom + $gap))
-        $summary.Size = New-Object System.Drawing.Size([Math]::Max(100, $clientWidth - (2 * $margin)), $summaryHeight)
-        $operationGroup.Location = New-Object System.Drawing.Point($margin, $operationTop)
-        $operationGroup.Size = New-Object System.Drawing.Size([Math]::Max(300, $clientWidth - (2 * $margin)), $operationHeight)
-
-        $operationMargin = [int][Math]::Round(12 * $scale)
-        $operationButtonTop = [int][Math]::Round(18 * $scale)
-        $operationStatusTop = [int][Math]::Round(23 * $scale)
-        $operationOutputTop = [int][Math]::Round(52 * $scale)
-        $operationBottomSpace = [int][Math]::Round(12 * $scale)
-        $cancelOperation.Location = New-Object System.Drawing.Point(
-            ($operationGroup.ClientSize.Width - $operationMargin - $cancelOperation.Width),
-            $operationButtonTop
-        )
-        $copyOutput.Location = New-Object System.Drawing.Point(($cancelOperation.Left - $gap - $copyOutput.Width), $operationButtonTop)
-        $statusLeft = if ($operationProgress.Visible) { $operationProgress.Right + $gap } else { $operationMargin }
-        $operationStatus.Location = New-Object System.Drawing.Point($statusLeft, $operationStatusTop)
-        $operationStatus.Width = [Math]::Max(100, $copyOutput.Left - $gap - $statusLeft)
-        $operationOutput.Location = New-Object System.Drawing.Point($operationMargin, $operationOutputTop)
-        $operationOutput.Size = New-Object System.Drawing.Size(
-            [Math]::Max(200, $operationGroup.ClientSize.Width - (2 * $operationMargin)),
-            [Math]::Max(60, $operationGroup.ClientSize.Height - $operationOutputTop - $operationBottomSpace)
-        )
-
-        $add.Location = New-Object System.Drawing.Point($margin, $firstButtonRow)
-        $remove.Location = New-Object System.Drawing.Point(($add.Right + $gap), $firstButtonRow)
-        $settings.Location = New-Object System.Drawing.Point(($remove.Right + $gap), $firstButtonRow)
-        $sync.Location = New-Object System.Drawing.Point(($right - $sync.Width), $firstButtonRow)
-        $build.Location = New-Object System.Drawing.Point(($sync.Left - $gap - $build.Width), $firstButtonRow)
-
-        $reports.Location = New-Object System.Drawing.Point($margin, $secondButtonRow)
-        $scan.Location = New-Object System.Drawing.Point(($reports.Right + $gap), $secondButtonRow)
-        $refresh.Location = New-Object System.Drawing.Point(($scan.Right + $gap), $secondButtonRow)
-        $gitPull.Location = New-Object System.Drawing.Point(($refresh.Right + $gap), $secondButtonRow)
-        $installApk.Location = New-Object System.Drawing.Point(($gitPull.Right + $gap), $secondButtonRow)
-        $exit.Location = New-Object System.Drawing.Point(($right - $exit.Width), $secondButtonRow)
-
-        $fixedColumnWidth = $list.Columns[0].Width + $list.Columns[1].Width +
-            $list.Columns[2].Width + $list.Columns[3].Width + $list.Columns[5].Width
-        $list.Columns[4].Width = [Math]::Max(180, $list.ClientSize.Width - $fixedColumnWidth - 8)
-    }
-
-    $form.Add_Resize({ & $layoutDashboard })
+    $layoutDashboard = { $view.LayoutDashboard() }
     & $layoutDashboard
 
     $selectedPath = {
@@ -843,17 +668,31 @@ function Select-SavedProjectAction {
     $refreshSummary = {
         $path = & $selectedPath
         if (-not $path) {
-            $summary.Text = 'Select a project to see its settings.'
+            $hintText = if ($list.Items.Count -eq 0) {
+                'Add a project to build, install, and run it.'
+            } else {
+                'Select a project to see what Sync & Run will do.'
+            }
+            $view.SetDetails('No project selected', '', $hintText, '', '', '')
             return
         }
         $pref = Get-ProjectPreference -ProjectPath $path
-        $apkText = if ($pref.preferredApk) { $pref.preferredApk } else { '(prompt/default)' }
-        $javaText = if ($pref.javaHome) { $pref.javaHome } else { '(environment default)' }
-        $deviceText = if ($pref.deviceSerial) { $pref.deviceSerial } else { '(automatic)' }
-        $summary.Text = "Task: $($pref.gradleTask)    APK: $apkText    JDK: $javaText    Device: $deviceText    Auto-launch: $([bool]$pref.autoLaunch)"
+        $item = $list.SelectedItems[0]
+        $preview = Get-DroidRunSyncPreview -GitStatus $item.SubItems[1].Text -BuildStatus $item.SubItems[2].Text `
+            -DeviceStatus $item.SubItems[3].Text -AutoLaunch ([bool]$pref.autoLaunch)
+        $marker = if ($preview.Ready) { [char]0x25B6 } else { '!' }
+        $planTone = if ($preview.Ready) { 'ok' } elseif ($preview.Headline -like 'Status*') { '' } else { 'warn' }
+        $dot = "  $([char]0x00B7)  "
+        $apkText = if ($pref.preferredApk) { $pref.preferredApk } else { 'automatic' }
+        $javaText = if ($pref.javaHome) { $pref.javaHome } else { 'from environment' }
+        $deviceText = if ($pref.deviceSerial) { $pref.deviceSerial } else { 'automatic' }
+        $launchText = if ($pref.autoLaunch) { 'on' } else { 'off' }
+        $settingsText = (@("Task $($pref.gradleTask)", "APK $apkText", "JDK $javaText", "Device $deviceText", "Auto-launch $launchText") -join $dot)
+        $view.SetDetails((Split-Path -Leaf $path), $path, "$marker  $($preview.Headline)", $planTone, $preview.Fix, $settingsText)
     }
 
     $dashboardState = [pscustomobject]@{
+        CancelRequested = $false
         Operation = $null
         StatusRefresh = $null
         PendingInitialProject = $null
@@ -879,20 +718,25 @@ function Select-SavedProjectAction {
         }
         if ($null -eq $item) {
             $item = New-Object System.Windows.Forms.ListViewItem([string]$Result.Project)
-            for ($index = 1; $index -lt 6; $index++) { [void]$item.SubItems.Add('') }
+            for ($index = 1; $index -lt 5; $index++) { [void]$item.SubItems.Add('') }
             $item.Tag = [string]$Result.ProjectPath
             [void]$list.Items.Add($item)
         }
 
-        while ($item.SubItems.Count -lt 6) { [void]$item.SubItems.Add('') }
+        while ($item.SubItems.Count -lt 5) { [void]$item.SubItems.Add('') }
         $item.Text = [string]$Result.Project
         $gitDisplay = if ($Result.GitBranch) { "$($Result.GitBranch) | $($Result.GitStatus)" } else { [string]$Result.GitStatus }
-        $item.SubItems[1].Text = $gitDisplay
+        # Each status cell is drawn as a chip; the branch is shown before the Git chip.
+        $item.SubItems[1].Text = [string]$Result.GitStatus
+        $item.SubItems[1].Tag = New-DroidRunChipCell -Status ([string]$Result.GitStatus) -Prefix ([string]$Result.GitBranch)
         $item.SubItems[2].Text = [string]$Result.BuildStatus
+        $item.SubItems[2].Tag = New-DroidRunChipCell -Status ([string]$Result.BuildStatus)
         $item.SubItems[3].Text = [string]$Result.DeviceStatus
-        $item.SubItems[4].Text = [string]$Result.ProjectPath
-        $item.SubItems[5].Text = $CheckedText
-        $item.ToolTipText = "Git: $gitDisplay`n$($Result.GitDetail)`nBuild: $($Result.BuildDetail)`nDevice: $($Result.DeviceDetail)"
+        $item.SubItems[3].Tag = New-DroidRunChipCell -Status ([string]$Result.DeviceStatus)
+        $item.SubItems[4].Text = $CheckedText
+        $item.ToolTipText = "Git: $gitDisplay`n$($Result.GitDetail)`nBuild: $($Result.BuildStatus). $($Result.BuildDetail)`nDevice: $($Result.DeviceStatus). $($Result.DeviceDetail)"
+        $list.Invalidate()
+        if ($item.Selected) { & $refreshSummary }
     }
 
     $newUnknownStatus = {
@@ -1088,9 +932,14 @@ function Select-SavedProjectAction {
         $cached = @{}
         foreach ($existing in $list.Items) {
             $values = @()
-            foreach ($subItem in $existing.SubItems) { $values += [string]$subItem.Text }
+            $tags = @()
+            foreach ($subItem in $existing.SubItems) {
+                $values += [string]$subItem.Text
+                $tags += , $subItem.Tag
+            }
             $cached[[string]$existing.Tag] = [pscustomobject]@{
                 Values = $values
+                Tags = $tags
                 ToolTipText = $existing.ToolTipText
             }
         }
@@ -1100,18 +949,22 @@ function Select-SavedProjectAction {
             $list.Items.Clear()
             foreach ($projectPath in $projects) {
                 $entry = $cached[[string]$projectPath]
-                if ($null -ne $entry -and $entry.Values.Count -ge 5) {
+                if ($null -ne $entry -and $entry.Values.Count -ge 4) {
+                    # Keep the previous result visible until this project is rechecked.
                     $item = New-Object System.Windows.Forms.ListViewItem($entry.Values[0])
-                    for ($index = 1; $index -lt 5; $index++) { [void]$item.SubItems.Add($entry.Values[$index]) }
+                    for ($index = 1; $index -lt 4; $index++) {
+                        $subItem = $item.SubItems.Add($entry.Values[$index])
+                        $subItem.Tag = $entry.Tags[$index]
+                    }
                     [void]$item.SubItems.Add('Queued')
                     $item.ToolTipText = $entry.ToolTipText
                 }
                 else {
                     $item = New-Object System.Windows.Forms.ListViewItem((Split-Path -Leaf $projectPath))
-                    [void]$item.SubItems.Add('Checking...')
-                    [void]$item.SubItems.Add('Checking...')
-                    [void]$item.SubItems.Add('Checking...')
-                    [void]$item.SubItems.Add($projectPath)
+                    for ($index = 1; $index -lt 4; $index++) {
+                        $subItem = $item.SubItems.Add('Checking...')
+                        $subItem.Tag = New-DroidRunChipCell -Status 'Checking...'
+                    }
                     [void]$item.SubItems.Add('Queued')
                 }
                 $item.Tag = $projectPath
@@ -1122,6 +975,9 @@ function Select-SavedProjectAction {
         finally { $list.EndUpdate() }
 
         if ($list.SelectedItems.Count -eq 0 -and $list.Items.Count -gt 0) { $list.Items[0].Selected = $true }
+        $view.ShowEmpty($projects.Count -eq 0)
+        $view.ProjectsTitle.Text = if ($projects.Count -gt 0) { "Projects ($($projects.Count))" } else { 'Projects' }
+        & $refreshSummary
         if ($projects.Count -eq 0) {
             $statusTimestamp.Text = 'No saved projects.'
             & $refreshSummary
@@ -1182,8 +1038,7 @@ function Select-SavedProjectAction {
         $sync.Enabled = $selected -and -not $anyBusy
         $build.Enabled = $selected -and -not $anyBusy
         $installApk.Enabled = $selected -and -not $anyBusy
-        $cancelOperation.Enabled = $busy
-        $operationProgress.Visible = $busy
+        $cancelOperation.Enabled = $busy -and -not $dashboardState.CancelRequested
         if ($null -ne $trayCancel) {
             $trayCancel.Enabled = $anyBusy
             $trayCancel.Text = if ($busy) {
@@ -1199,6 +1054,12 @@ function Select-SavedProjectAction {
 
     $operationTimer = New-Object System.Windows.Forms.Timer
     $operationTimer.Interval = 100
+
+    $formatElapsed = {
+        param([TimeSpan]$Span)
+        if ($Span.TotalSeconds -lt 60) { return "$([Math]::Round($Span.TotalSeconds, 1)) seconds" }
+        return ('{0}:{1:00}' -f [int][Math]::Floor($Span.TotalMinutes), $Span.Seconds)
+    }
 
     $completeOperation = {
         if ($null -eq $dashboardState.Operation) { return }
@@ -1226,28 +1087,30 @@ function Select-SavedProjectAction {
         if ($lines.Count -gt 0) { & $appendOperationOutput $lines.ToArray() }
 
         $elapsed = (Get-Date) - $operation.StartedAt
+        $elapsedText = & $formatElapsed $elapsed
         $dashboardState.LastExitCode = $exitCode
         $wasCancelled = $operation.Runner.CancellationRequested
         if ($wasCancelled) {
-            $operationStatus.Text = "$($operation.DisplayName) cancelled after $([Math]::Round($elapsed.TotalSeconds, 1)) seconds."
-            $operationStatus.ForeColor = [System.Drawing.Color]::DarkOrange
+            $resultMessage = "$($operation.DisplayName) cancelled after $elapsedText."
+            $view.SetOperationState('cancelled', "$($operation.DisplayName) cancelled", "after $elapsedText. Nothing after the stop point ran.")
             & $appendOperationOutput @('', "Cancelled. Exit code: $exitCode")
         }
         elseif ($exitCode -eq 0) {
-            $operationStatus.Text = "$($operation.DisplayName) completed in $([Math]::Round($elapsed.TotalSeconds, 1)) seconds."
-            $operationStatus.ForeColor = [System.Drawing.Color]::DarkGreen
+            $resultMessage = "$($operation.DisplayName) completed in $elapsedText."
+            $view.SetOperationState('success', "$($operation.DisplayName) completed", "in $elapsedText.")
             & $appendOperationOutput @('', "Completed successfully. Exit code: $exitCode")
         }
         else {
-            $operationStatus.Text = "$($operation.DisplayName) failed with exit code $exitCode after $([Math]::Round($elapsed.TotalSeconds, 1)) seconds."
-            $operationStatus.ForeColor = [System.Drawing.Color]::Firebrick
+            $resultMessage = "$($operation.DisplayName) failed with exit code $exitCode after $elapsedText."
             $failureHint = if ($operation.Action -eq 'GitPull') {
                 'Review the Git output above before retrying.'
             } else {
                 'Use Reports to open the complete build/install log.'
             }
+            $view.SetOperationState('failed', "$($operation.DisplayName) failed", "Exit code $exitCode after $elapsedText. $failureHint")
             & $appendOperationOutput @('', "Failed. Exit code: $exitCode", $failureHint)
         }
+        $dashboardState.CancelRequested = $false
 
         $operation.Runner.Dispose()
         $dashboardState.Operation = $null
@@ -1256,7 +1119,7 @@ function Select-SavedProjectAction {
         if ($null -ne $trayIcon -and -not $isUiSmokeTest) {
             $trayIcon.Text = 'DroidRun'
             $trayIcon.BalloonTipTitle = 'DroidRun'
-            $trayIcon.BalloonTipText = $operationStatus.Text
+            $trayIcon.BalloonTipText = $resultMessage
             $trayIcon.BalloonTipIcon = if ($exitCode -eq 0) {
                 [System.Windows.Forms.ToolTipIcon]::Info
             } elseif ($wasCancelled) {
@@ -1292,7 +1155,10 @@ function Select-SavedProjectAction {
         }
         if ($lines.Count -gt 0) { & $appendOperationOutput $lines.ToArray() }
 
-        if (-not $operation.Runner.IsRunning) { & $completeOperation }
+        if (-not $operation.Runner.IsRunning) { & $completeOperation; return }
+        if (-not $dashboardState.CancelRequested) {
+            $operationStatus.Text = "Running for $(& $formatElapsed ((Get-Date) - $operation.StartedAt))"
+        }
     })
 
     $startOperation = {
@@ -1332,8 +1198,7 @@ function Select-SavedProjectAction {
             $runner
         }
         if ($Action -notlike 'Smoke*' -and -not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
-            $operationStatus.Text = "$displayName could not start because its helper script is missing."
-            $operationStatus.ForeColor = [System.Drawing.Color]::Firebrick
+            $view.SetOperationState('failed', "$displayName could not start", 'Its helper script is missing from this checkout.')
             & $appendOperationOutput @("Helper script was not found: $scriptPath")
             return
         }
@@ -1377,8 +1242,8 @@ function Select-SavedProjectAction {
         $processRunner = New-Object WindowsTools.BufferedProcessRunner
 
         $operationOutput.Clear()
-        $operationStatus.Text = "Starting $displayName..."
-        $operationStatus.ForeColor = [System.Drawing.SystemColors]::ControlText
+        $dashboardState.CancelRequested = $false
+        $view.SetOperationState('running', $displayName, 'Starting...')
         & $appendOperationOutput @(
             "$displayName",
             ('=' * $displayName.Length),
@@ -1398,7 +1263,7 @@ function Select-SavedProjectAction {
 
         try {
             $processRunner.Start($powershellPath, $processArguments, $PSScriptRoot)
-            $operationStatus.Text = "$displayName is running..."
+            $operationStatus.Text = 'Running for 0.0 seconds'
             $form.Text = "DroidRun - $displayName"
             if ($null -ne $trayIcon) { $trayIcon.Text = "DroidRun - $displayName" }
             $operationTimer.Start()
@@ -1407,8 +1272,7 @@ function Select-SavedProjectAction {
             $processRunner.Dispose()
             $dashboardState.Operation = $null
             $dashboardState.LastExitCode = 1
-            $operationStatus.Text = "$displayName could not be started."
-            $operationStatus.ForeColor = [System.Drawing.Color]::Firebrick
+            $view.SetOperationState('failed', "$displayName could not start", $_.Exception.Message)
             & $appendOperationOutput @("ERROR: $($_.Exception.Message)")
             & $setOperationControls
         }
@@ -1447,8 +1311,8 @@ function Select-SavedProjectAction {
     $cancelOperation.Add_Click({
         if ($null -eq $dashboardState.Operation) { return }
         $cancelOperation.Enabled = $false
-        $operationStatus.Text = "Cancelling $($dashboardState.Operation.DisplayName)..."
-        $operationStatus.ForeColor = [System.Drawing.Color]::DarkOrange
+        $dashboardState.CancelRequested = $true
+        $view.SetOperationState('cancelling', "Cancelling $($dashboardState.Operation.DisplayName)", 'Stopping the process tree...')
         $dashboardState.Operation.Runner.Cancel()
     })
 
@@ -1462,13 +1326,22 @@ function Select-SavedProjectAction {
     $remove.Add_Click({
         $path = & $selectedPath
         if (-not $path) { return }
+        $answer = [System.Windows.Forms.MessageBox]::Show(
+            $form,
+            "Remove $(Split-Path -Leaf $path) from DroidRun?`n`nThe folder, its files, and its saved settings are not changed. You can add it again later.",
+            'Remove project',
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question,
+            [System.Windows.Forms.MessageBoxDefaultButton]::Button2
+        )
+        if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) { return }
         $remaining = @(Get-SavedProjects | Where-Object { $_ -ine $path })
         Save-SavedProjects -Projects $remaining
         & $refreshRows $false
     })
 
     $reports.Add_Click({ Show-Reports -Owner $form })
-    $scan.Add_Click({ Show-DeviceScan -Owner $form })
+    $scan.Add_Click({ Show-DeviceScan -Owner $form -OnProgress { param($text) $statusTimestamp.Text = $text; $statusTimestamp.Refresh() } })
     $refresh.Add_Click({
         if ($null -ne $dashboardState.StatusRefresh) {
             $dashboardState.StatusRefresh.CancelRequested = $true
@@ -1495,6 +1368,52 @@ function Select-SavedProjectAction {
         & $refreshRows $false
     })
 
+    # Smoke-test only: fill the dashboard with representative rows and capture it.
+    $loadPreviewFixture = {
+        $fixtures = @(
+            @{ Name = 'chatturanga'; Branch = 'main'; Git = 'Behind 2'; Build = 'Stale'; Device = 'Different' },
+            @{ Name = 'prism-break'; Branch = 'feature/camera-flip-and-a-very-long-branch-name'; Git = 'Dirty'; Build = 'Fresh'; Device = 'Same' },
+            @{ Name = 'codex-fuel'; Branch = 'ui/glow-up'; Git = 'Current'; Build = 'Fresh'; Device = 'Same' },
+            @{ Name = 'embrient-mic101-companion'; Branch = 'main'; Git = 'Diverged 3/1'; Build = 'Ambiguous'; Device = 'Unknown' },
+            @{ Name = 'kiosk-launcher'; Branch = 'release/1.4'; Git = 'Current'; Build = 'No APK'; Device = 'Choose device' }
+        )
+        foreach ($fixture in $fixtures) {
+            & $setStatusRow -CheckedText '14:02:11' -Result ([pscustomobject]@{
+                ProjectPath = "C:\src with spaces\$($fixture.Name)"; Project = $fixture.Name; GitBranch = $fixture.Branch
+                GitStatus = $fixture.Git; GitDetail = ''; BuildStatus = $fixture.Build; BuildDetail = ''
+                DeviceStatus = $fixture.Device; DeviceDetail = ''; Device = ''
+            })
+        }
+        $view.ProjectsTitle.Text = "Projects ($($fixtures.Count))"
+        $view.ShowEmpty($false)
+        $statusTimestamp.Text = 'Last checked: 14:02:11 (5/5)'
+        $list.Items[0].Selected = $true
+        & $refreshSummary
+        & $appendOperationOutput @('Sync & Run', '==========', 'Git:    Behind 2', 'Build:  Stale', 'Device: Different', '', 'Completed successfully. Exit code: 0')
+        $view.SetOperationState('success', 'Sync & Run completed', 'in 41.2 seconds.')
+        foreach ($button in @($sync, $build, $gitPull, $installApk, $settings, $remove)) { $button.Enabled = $true }
+    }
+
+    $savePreview = {
+        param([string]$Label)
+        $target = $UiSmokeTestPreviewPath -replace '\.png$', "-$Label.png"
+        $form.Activate()
+        $form.Refresh()
+        [System.Windows.Forms.Application]::DoEvents()
+        Start-Sleep -Milliseconds 300
+        $origin = $form.PointToScreen([System.Drawing.Point]::Empty)
+        $bitmap = New-Object System.Drawing.Bitmap($form.ClientSize.Width, $form.ClientSize.Height)
+        try {
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            try { $graphics.CopyFromScreen($origin, [System.Drawing.Point]::Empty, $form.ClientSize) }
+            catch { $form.DrawToBitmap($bitmap, (New-Object System.Drawing.Rectangle(0, 0, $form.ClientSize.Width, $form.ClientSize.Height))) }
+            finally { $graphics.Dispose() }
+            $bitmap.Save($target, [System.Drawing.Imaging.ImageFormat]::Png)
+            Write-Host "UI preview saved: $target"
+        }
+        finally { $bitmap.Dispose() }
+    }
+
     $form.Add_Shown({
         if ($UiSmokeTest -and -not $UiSmokeTestOperation -and -not $UiSmokeTestOperationSuccess -and
             -not $UiSmokeTestCancellation -and -not $UiSmokeTestStatusRefresh -and -not $UiSmokeTestInheritedOutput) {
@@ -1502,11 +1421,34 @@ function Select-SavedProjectAction {
                 throw "Taskbar identity could not be applied: $($taskbarIdentityState.Error)"
             }
             Write-Host "UI taskbar identity: $appUserModelId"
-            $form.ClientSize = New-Object System.Drawing.Size(940, 700)
-            & $layoutDashboard
-            if (-not $form.ClientRectangle.Contains($installApk.Bounds) -or
-                $installApk.Bounds.IntersectsWith($exit.Bounds)) { throw 'Install APK button is clipped or overlaps Exit.' }
+            if ($UiSmokeTestPreviewPath) { & $loadPreviewFixture }
+            foreach ($size in @(@(900, 680), @(1180, 760), @(1600, 900))) {
+                $form.ClientSize = New-Object System.Drawing.Size($size[0], $size[1])
+                & $layoutDashboard
+                [System.Windows.Forms.Application]::DoEvents()
+                # Every action button must sit fully inside its card and not overlap another.
+                $buttons = @($sync, $build, $gitPull, $installApk, $settings, $remove, $refresh, $scan, $reports,
+                    $add, $copyOutput)
+                foreach ($button in $buttons) {
+                    if (-not $button.Parent.ClientRectangle.Contains($button.Bounds)) {
+                        throw "$($button.Text) is clipped at $($size[0])x$($size[1])."
+                    }
+                    foreach ($other in $buttons) {
+                        if ($other -ne $button -and $other.Parent -eq $button.Parent -and $other.Bounds.IntersectsWith($button.Bounds)) {
+                            throw "$($button.Text) overlaps $($other.Text) at $($size[0])x$($size[1])."
+                        }
+                    }
+                }
+                foreach ($card in @($view.Details, $view.Operation, $view.ProjectsFrame)) {
+                    if (-not $form.ClientRectangle.Contains($card.Bounds)) { throw "A dashboard card is clipped at $($size[0])x$($size[1])." }
+                }
+                if ($view.Details.Bounds.IntersectsWith($view.Operation.Bounds) -or $view.ProjectsFrame.Bounds.IntersectsWith($view.Details.Bounds)) {
+                    throw "Dashboard cards overlap at $($size[0])x$($size[1])."
+                }
+                if ($UiSmokeTestPreviewPath) { & $savePreview "$($size[0])x$($size[1])" }
+            }
             Write-Host 'UI Install APK button: visible and unobstructed'
+            Write-Host 'UI layout: buttons and cards fit at 900x680, 1180x760, and 1600x900'
             $form.Close()
             return
         }

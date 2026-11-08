@@ -20,6 +20,8 @@ try {
     }
     Push-Location (Join-Path $root 'tools/DroidRun')
     try {
+        & ./Test-DroidRunPresentation.ps1
+        Assert-Exit 'DroidRun presentation'
         & ./Test-AndroidBuildBackends.ps1
         Assert-Exit 'DroidRun backends'
         & ./Test-AndroidBuildInstall.ps1

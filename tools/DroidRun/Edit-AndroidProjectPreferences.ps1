@@ -10,6 +10,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 . (Join-Path $PSScriptRoot 'WindowsTaskbarIdentity.ps1')
+. (Join-Path $PSScriptRoot 'DroidRunTheme.ps1')
 [System.Windows.Forms.Application]::EnableVisualStyles()
 try { [WindowsTools.TaskbarIdentity]::SetCurrentProcessAppId((Get-AndroidBuildInstallAppId)) }
 catch { Write-Verbose "Could not set the settings-window taskbar identity: $($_.Exception.Message)" }
@@ -219,8 +220,15 @@ function Select-Device {
     $dialog.MinimumSize = New-Object System.Drawing.Size(420, 280)
     $dialog.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::Sizable
     $dialog.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
+    [DroidRun.Theme]::ApplyForm($dialog)
 
     $list = New-Object System.Windows.Forms.ListBox
+    if ([DroidRun.Theme]::Enabled) {
+        $list.BackColor = [DroidRun.Theme]::ConsoleBack
+        $list.ForeColor = [DroidRun.Theme]::Text
+        $list.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+    }
+    $list.IntegralHeight = $false
     $list.Location = New-Object System.Drawing.Point(16, 16)
     $list.Size = New-Object System.Drawing.Size(488, 210)
     $list.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
@@ -230,7 +238,7 @@ function Select-Device {
     foreach ($entry in $Devices) { [void]$list.Items.Add("$($entry.Model) [$($entry.Serial)]") }
     $dialog.Controls.Add($list)
 
-    $ok = New-Object System.Windows.Forms.Button
+    $ok = New-DroidRunButton -Text ' ' -Kind Primary
     $ok.Text = 'Use Device'
     $ok.Size = New-Object System.Drawing.Size(110, 32)
     $ok.Location = New-Object System.Drawing.Point(286, 248)
@@ -238,7 +246,7 @@ function Select-Device {
     $ok.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
     $dialog.Controls.Add($ok)
 
-    $cancel = New-Object System.Windows.Forms.Button
+    $cancel = New-DroidRunButton -Text ' ' -Kind Secondary
     $cancel.Text = 'Cancel'
     $cancel.Size = New-Object System.Drawing.Size(100, 32)
     $cancel.Location = New-Object System.Drawing.Point(404, 248)
@@ -266,34 +274,39 @@ $projectPath = Normalize-Path -Path $Project
 $preference = Get-Preference -ProjectPath $projectPath
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = 'Android Project Settings'
+$form.Text = "$(Split-Path -Leaf $projectPath) settings - DroidRun"
 $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
 if ($null -ne $appIcon) { $form.Icon = $appIcon }
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
-$form.ClientSize = New-Object System.Drawing.Size(760, 390)
-$form.MinimumSize = New-Object System.Drawing.Size(640, 430)
+$form.ClientSize = New-Object System.Drawing.Size(760, 470)
+$form.MinimumSize = New-Object System.Drawing.Size(640, 510)
 $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::Sizable
 $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
+[DroidRun.Theme]::ApplyForm($form)
+$top = 72  # field rows start below the title and path
 
-$title = New-Object System.Windows.Forms.Label
-$title.Text = "Project: $projectPath"
-$title.AutoSize = $false
-$title.AutoEllipsis = $true
-$title.Location = New-Object System.Drawing.Point(16, 16)
-$title.Size = New-Object System.Drawing.Size(704, 24)
+$title = [DroidRun.Theme]::NewLabel((Split-Path -Leaf $projectPath), 12, [System.Drawing.FontStyle]::Bold, [DroidRun.Theme]::Text)
+$title.Location = New-Object System.Drawing.Point(16, 12)
+$title.Size = New-Object System.Drawing.Size(704, 28)
 $title.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
     [System.Windows.Forms.AnchorStyles]::Left -bor
     [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($title)
 
+$pathLabel = [DroidRun.Theme]::NewLabel($projectPath, 9, [System.Drawing.FontStyle]::Regular, [DroidRun.Theme]::Muted)
+$pathLabel.Location = New-Object System.Drawing.Point(16, 40)
+$pathLabel.Size = New-Object System.Drawing.Size(704, 20)
+$pathLabel.Anchor = $title.Anchor
+$form.Controls.Add($pathLabel)
+
 $taskLabel = New-Object System.Windows.Forms.Label
 $taskLabel.Text = 'Gradle task:'
 $taskLabel.AutoSize = $true
-$taskLabel.Location = New-Object System.Drawing.Point(16, 58)
+$taskLabel.Location = New-Object System.Drawing.Point(16, 92)
 $form.Controls.Add($taskLabel)
 
 $task = New-Object System.Windows.Forms.TextBox
-$task.Location = New-Object System.Drawing.Point(150, 54)
+$task.Location = New-Object System.Drawing.Point(150, 88)
 $task.Size = New-Object System.Drawing.Size(570, 24)
 $task.Text = $preference.gradleTask
 $task.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
@@ -304,11 +317,11 @@ $form.Controls.Add($task)
 $apkLabel = New-Object System.Windows.Forms.Label
 $apkLabel.Text = 'Preferred APK:'
 $apkLabel.AutoSize = $true
-$apkLabel.Location = New-Object System.Drawing.Point(16, 100)
+$apkLabel.Location = New-Object System.Drawing.Point(16, 134)
 $form.Controls.Add($apkLabel)
 
 $apk = New-Object System.Windows.Forms.TextBox
-$apk.Location = New-Object System.Drawing.Point(150, 96)
+$apk.Location = New-Object System.Drawing.Point(150, 130)
 $apk.Size = New-Object System.Drawing.Size(470, 24)
 $apk.Text = $preference.preferredApk
 $apk.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
@@ -316,21 +329,21 @@ $apk.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
     [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($apk)
 
-$apkBrowse = New-Object System.Windows.Forms.Button
+$apkBrowse = New-DroidRunButton -Text ' ' -Kind Secondary
 $apkBrowse.Text = 'Browse...'
 $apkBrowse.Size = New-Object System.Drawing.Size(92, 28)
-$apkBrowse.Location = New-Object System.Drawing.Point(628, 94)
+$apkBrowse.Location = New-Object System.Drawing.Point(628, 128)
 $apkBrowse.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($apkBrowse)
 
 $javaLabel = New-Object System.Windows.Forms.Label
 $javaLabel.Text = 'JAVA_HOME:'
 $javaLabel.AutoSize = $true
-$javaLabel.Location = New-Object System.Drawing.Point(16, 142)
+$javaLabel.Location = New-Object System.Drawing.Point(16, 176)
 $form.Controls.Add($javaLabel)
 
 $java = New-Object System.Windows.Forms.TextBox
-$java.Location = New-Object System.Drawing.Point(150, 138)
+$java.Location = New-Object System.Drawing.Point(150, 172)
 $java.Size = New-Object System.Drawing.Size(470, 24)
 $java.Text = $preference.javaHome
 $java.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
@@ -338,21 +351,21 @@ $java.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
     [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($java)
 
-$javaBrowse = New-Object System.Windows.Forms.Button
+$javaBrowse = New-DroidRunButton -Text ' ' -Kind Secondary
 $javaBrowse.Text = 'Browse...'
 $javaBrowse.Size = New-Object System.Drawing.Size(92, 28)
-$javaBrowse.Location = New-Object System.Drawing.Point(628, 136)
+$javaBrowse.Location = New-Object System.Drawing.Point(628, 170)
 $javaBrowse.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($javaBrowse)
 
 $deviceLabel = New-Object System.Windows.Forms.Label
 $deviceLabel.Text = 'Preferred device:'
 $deviceLabel.AutoSize = $true
-$deviceLabel.Location = New-Object System.Drawing.Point(16, 184)
+$deviceLabel.Location = New-Object System.Drawing.Point(16, 218)
 $form.Controls.Add($deviceLabel)
 
 $device = New-Object System.Windows.Forms.TextBox
-$device.Location = New-Object System.Drawing.Point(150, 180)
+$device.Location = New-Object System.Drawing.Point(150, 214)
 $device.Size = New-Object System.Drawing.Size(470, 24)
 $device.Text = $preference.deviceSerial
 $device.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
@@ -360,60 +373,83 @@ $device.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
     [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($device)
 
-$deviceDetect = New-Object System.Windows.Forms.Button
+$deviceDetect = New-DroidRunButton -Text ' ' -Kind Secondary
 $deviceDetect.Text = 'Detect...'
 $deviceDetect.Size = New-Object System.Drawing.Size(92, 28)
-$deviceDetect.Location = New-Object System.Drawing.Point(628, 178)
+$deviceDetect.Location = New-Object System.Drawing.Point(628, 212)
 $deviceDetect.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($deviceDetect)
 
 $launch = New-Object System.Windows.Forms.CheckBox
 $launch.Text = 'Launch the app automatically after a successful install'
 $launch.AutoSize = $true
-$launch.Location = New-Object System.Drawing.Point(150, 226)
+$launch.Location = New-Object System.Drawing.Point(150, 260)
 $launch.Checked = [bool]$preference.autoLaunch
 $launch.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left
 $form.Controls.Add($launch)
 
 $hint = New-Object System.Windows.Forms.Label
-$hint.Text = 'Gradle task applies only to Gradle. Godot/custom builds use the configuration below. Detect stores the adb serial.'
+$hint.Text = 'Gradle task applies to Gradle projects only; Godot and custom builds use their own configuration. Detect saves the adb serial of a connected device.'
 $hint.AutoSize = $false
 $hint.AutoEllipsis = $true
-$hint.Location = New-Object System.Drawing.Point(150, 258)
+$hint.Location = New-Object System.Drawing.Point(150, 292)
 $hint.Size = New-Object System.Drawing.Size(570, 36)
 $hint.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
     [System.Windows.Forms.AnchorStyles]::Left -bor
     [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($hint)
 
-$backendButton = New-Object System.Windows.Forms.Button
+$backendButton = New-DroidRunButton -Text ' ' -Kind Secondary
 $backendButton.Text = 'Godot / custom build...'
 $backendButton.Size = New-Object System.Drawing.Size(200, 30)
-$backendButton.Location = New-Object System.Drawing.Point(150, 298)
+$backendButton.Location = New-Object System.Drawing.Point(150, 332)
 $backendButton.Add_Click({
     try { & (Join-Path $PSScriptRoot 'Edit-AndroidBuildBackend.ps1') -Project $projectPath }
-    catch { [void][System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Build configuration') }
+    catch { & $showError "Build configuration could not be opened: $($_.Exception.Message)" $null }
 })
 $form.Controls.Add($backendButton)
 
-$reset = New-Object System.Windows.Forms.Button
-$reset.Text = 'Reset Defaults'
+foreach ($field in @($task, $apk, $java, $device)) { [DroidRun.Theme]::StyleInput($field) }
+[DroidRun.Theme]::StyleCheckBox($launch)
+$hint.ForeColor = [DroidRun.Theme]::Muted
+$task.AccessibleName = 'Gradle task'
+$apk.AccessibleName = 'Preferred APK'
+$java.AccessibleName = 'JAVA_HOME'
+$device.AccessibleName = 'Preferred device serial'
+
+# Validation and detection problems appear here, next to the fields, instead of in a dialog.
+$errorLabel = [DroidRun.Theme]::NewLabel('', 9, [System.Drawing.FontStyle]::Regular, [DroidRun.Theme]::ToneText('error'))
+$errorLabel.Location = New-Object System.Drawing.Point(150, 368)
+$errorLabel.Size = New-Object System.Drawing.Size(570, 40)
+$errorLabel.TextAlign = [System.Drawing.ContentAlignment]::TopLeft
+$errorLabel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor
+    [System.Windows.Forms.AnchorStyles]::Left -bor
+    [System.Windows.Forms.AnchorStyles]::Right
+$form.Controls.Add($errorLabel)
+$showError = {
+    param([string]$Message, [System.Windows.Forms.Control]$Field)
+    $errorLabel.Text = $Message
+    if ($null -ne $Field) { [void]$Field.Focus() }
+}
+
+$reset = New-DroidRunButton -Text ' ' -Kind Quiet
+$reset.Text = 'Reset to Defaults'
 $reset.Size = New-Object System.Drawing.Size(120, 32)
-$reset.Location = New-Object System.Drawing.Point(16, 338)
+$reset.Location = New-Object System.Drawing.Point(16, 418)
 $reset.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left
 $form.Controls.Add($reset)
 
-$save = New-Object System.Windows.Forms.Button
+$save = New-DroidRunButton -Text ' ' -Kind Primary
 $save.Text = 'Save'
 $save.Size = New-Object System.Drawing.Size(100, 32)
-$save.Location = New-Object System.Drawing.Point(512, 338)
+$save.Location = New-Object System.Drawing.Point(512, 418)
 $save.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($save)
 
-$cancel = New-Object System.Windows.Forms.Button
+$cancel = New-DroidRunButton -Text ' ' -Kind Secondary
 $cancel.Text = 'Cancel'
 $cancel.Size = New-Object System.Drawing.Size(100, 32)
-$cancel.Location = New-Object System.Drawing.Point(620, 338)
+$cancel.Location = New-Object System.Drawing.Point(620, 418)
 $cancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
 $cancel.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
 $form.Controls.Add($cancel)
@@ -444,12 +480,13 @@ $deviceDetect.Add_Click({
         $adb = Resolve-Adb -ProjectPath $projectPath
         if (-not $adb) { throw 'adb.exe could not be found.' }
         $devices = @(Get-ConnectedDevices -Adb $adb)
-        if ($devices.Count -eq 0) { throw 'No authorized Android device is currently connected.' }
+        if ($devices.Count -eq 0) { throw 'No authorised Android device is connected. Unlock it and accept the USB debugging prompt, then try again.' }
+        $errorLabel.Text = ''
         $selected = Select-Device -Devices $devices -Owner $form
         if ($null -ne $selected) { $device.Text = [string]$selected.Serial }
     }
     catch {
-        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Android Project Settings') | Out-Null
+        & $showError $_.Exception.Message $device
     }
 })
 
@@ -468,11 +505,11 @@ $save.Add_Click({
     $javaHome = $java.Text.Trim()
     if ($javaHome) {
         try { $javaHome = Normalize-Path -Path $javaHome } catch {
-            [System.Windows.Forms.MessageBox]::Show('JAVA_HOME is not a valid path.', 'Android Project Settings') | Out-Null
+            & $showError 'Not saved: JAVA_HOME is not a valid path.' $java
             return
         }
         if (-not (Test-Path -LiteralPath (Join-Path $javaHome 'bin\java.exe') -PathType Leaf)) {
-            [System.Windows.Forms.MessageBox]::Show('The selected JAVA_HOME does not contain bin\java.exe.', 'Android Project Settings') | Out-Null
+            & $showError 'Not saved: JAVA_HOME must be a JDK folder that contains bin\java.exe.' $java
             return
         }
     }

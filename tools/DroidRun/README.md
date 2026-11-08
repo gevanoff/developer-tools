@@ -46,7 +46,23 @@ The available actions are:
 - **Settings...** — configure persistent project-specific defaults including a preferred device;
 - **Scan Device...** — show device/APK comparison details for all saved projects;
 - **Reports...** — inspect previous build/install logs;
-- **Add... / Remove** — manage remembered repository paths.
+- **Add Project... / Remove...** — manage remembered repository paths. Remove asks first and never changes the folder or its saved settings.
+
+## Dashboard layout
+
+The dashboard uses a dark navy theme with the lime accent from the icon:
+
+- **Header** — app name, status-refresh progress, and **Scan Device...**, **Reports...**, and **Refresh Status**.
+- **Projects** — one row per saved project with its path, Git branch and status, Local Build, Device, and when it was last checked. Each status is a coloured chip; the text is always shown, so colour is never the only signal:
+  - green: nothing to do (**Current**, **Fresh**, **Same**);
+  - blue: Sync & Run will act on it (**Behind N**, **Stale**, **No APK**, **Different**, **Not installed**);
+  - amber: needs a decision or setting (**Dirty**, **No upstream**, **Ambiguous**, **Choose device**, ...);
+  - red: failed or unsafe (**Diverged**, **Fetch failed**, **Timed out**, ...);
+  - grey: informational or not yet known (**Ahead N**, **Not Git**, **Unknown**, **Checking...**).
+- **Selected project** — what Sync & Run will do from the last check, for example *Sync & Run will: Pull 2 commits → Build → Install → Launch*, or why it will stop and how to fix it. The preview follows the same rules as Sync & Run but is based on the last status check; Sync & Run always re-checks before acting. Below it are the project's saved settings and its actions: **Sync & Run** (primary), **Build & Install**, **Git Pull**, **Install APK...**, **Settings...**, and **Remove...**.
+- **Operation** — a Running / Stopping / Done / Failed / Cancelled badge, elapsed time, the result next to it, **Copy Output**, **Cancel**, and the live output.
+
+Windows high-contrast themes keep the system colours instead of the dark theme. The title bar and scroll bars follow the dark theme on Windows 10 1809 and later. The drawing code lives in `DroidRunUi.cs` and is compiled when the dashboard starts; the colour and preview rules live in `DroidRunPresentation.ps1` and match the Linux dashboard.
 
 The dashboard is resizable and scales with Windows display settings. It uses a distinct phone/build/install icon in the window, taskbar, and notification area so it is easy to distinguish from a generic PowerShell window. Double-clicking a project and pressing Enter both run the primary **Sync & Run** action. **Build & Install** remains available when an unconditional rebuild is wanted.
 
@@ -423,8 +439,20 @@ Backend regression tests (run locally using `scripts/check-windows.ps1` from the
 .\Test-AndroidBuildBackends.ps1
 ```
 
-The Git column includes the checked-out branch alongside its status, for example
-`main | Current` or `feature/camera-flip | Dirty`. Detached checkouts show
-`detached @ <short SHA>`. Hover over the row/cell to read the full branch name
+Status colours, the Sync & Run preview, and palette contrast (run by `scripts/check-windows.ps1`; also runs under PowerShell 7 on Linux):
+
+```powershell
+.\Test-DroidRunPresentation.ps1
+```
+
+To check the dashboard layout and save screenshots with sample data at 900x680, 1180x760, and 1600x900 (no device or saved projects are used):
+
+```powershell
+.\AndroidBuildInstall-Session.ps1 -UiSmokeTest -UiSmokeTestPreviewPath "$env:TEMP\droidrun-preview.png"
+```
+
+The Git column shows the checked-out branch before its status chip, for example
+`main` with **Current** or `feature/camera-flip` with **Dirty**. Detached checkouts show
+`detached @ <short SHA>`. Hover over the row to read the full branch name
 and status details if the column is truncated. Branch identity is local and
 remains available when remote or build-configuration checks fail.
