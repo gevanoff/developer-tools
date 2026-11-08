@@ -192,6 +192,14 @@ function Get-DroidRunRefreshTargets {
     return @($Projects)
 }
 
+function Get-DroidRunProjectsToCheck {
+    # The saved projects named in Only, in saved order; every project when Only is empty.
+    # Unlike Get-DroidRunRefreshTargets, an Only list that matches nothing checks nothing.
+    param([string[]]$Projects = @(), [string[]]$Only = @())
+    if (@($Only).Count -eq 0) { return @($Projects) }
+    return @($Projects | Where-Object { $project = $_; @($Only | Where-Object { $_ -ieq $project }).Count -gt 0 })
+}
+
 function Get-DroidRunRefreshLabel {
     param([int]$SelectedCount)
     if ($SelectedCount -le 0) { return 'Re&fresh All' }

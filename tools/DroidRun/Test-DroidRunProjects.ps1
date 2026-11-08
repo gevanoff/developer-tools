@@ -81,6 +81,13 @@ try {
     Assert-True ((@(Get-DroidRunRefreshTargets -Projects $all -Selected @('c:\C', 'C:\a')) -join '|') -eq 'C:\a|C:\c') 'Selected projects were not refreshed in list order.'
     Assert-True ((@(Get-DroidRunRefreshTargets -Projects $all -Selected @('C:\gone')) -join '|') -eq ($all -join '|')) 'A stale selection did not fall back to every project.'
     Assert-True ((@(Get-DroidRunRefreshTargets -Projects @('C:\only') -Selected @('C:\only'))).Count -eq 1) 'A single selected project was not kept as an array.'
+    # The dashboard indexes the checked projects, so a single project must stay a path, not a string of characters.
+    [string[]]$one = @(Get-DroidRunProjectsToCheck -Projects $all -Only @('c:\B'))
+    Assert-True ($one.Count -eq 1 -and $one[0] -eq 'C:\b') "One project to check became '$($one[0])'."
+    [string[]]$single = @(Get-DroidRunProjectsToCheck -Projects @('C:\only project') -Only @())
+    Assert-True ($single[0] -eq 'C:\only project') "The only saved project became '$($single[0])'."
+    Assert-True ((@(Get-DroidRunProjectsToCheck -Projects $all -Only @()) -join '|') -eq ($all -join '|')) 'An empty Only did not check every project.'
+    Assert-True (@(Get-DroidRunProjectsToCheck -Projects $all -Only @('C:\gone')).Count -eq 0) 'An Only list matching nothing checked projects.'
     Assert-True ((Get-DroidRunRefreshLabel 0) -eq 'Re&fresh All') 'Refresh label for no selection is wrong.'
     Assert-True ((Get-DroidRunRefreshLabel 1) -eq 'Re&fresh Selected') 'Refresh label for one selection is wrong.'
     Assert-True ((Get-DroidRunRefreshLabel 3) -eq 'Re&fresh 3 Selected') 'Refresh label for several selections is wrong.'

@@ -317,7 +317,8 @@ public static class TestAdb {
     Assert-True -Condition ($LASTEXITCODE -eq 0) -Message "Selected-project status refresh failed.`n$subsetText"
     Assert-True -Condition ($subsetText -match 'UI status smoke result: 1/1') -Message "Selected-project refresh checked more than the selection.`n$subsetText"
     Assert-True -Condition ($subsetText -match 'UI status row: project with spaces \| [^\r\n]*\| Not checked') -Message "A project outside the selection was checked.`n$subsetText"
-    Assert-True -Condition ($subsetText -match 'UI status row: second project \|') -Message "The selected project was not listed.`n$subsetText"
+    Assert-True -Condition ($subsetText -match 'UI status row: second project \| [^\r\n]*\| \d{2}:\d{2}:\d{2}') -Message "The selected project was not checked (a single target must stay a whole path).`n$subsetText"
+    Assert-True -Condition (@($subsetOutput | Where-Object { "$_" -like 'UI status row:*' }).Count -eq 2) -Message "Refreshing one project added an unexpected row.`n$subsetText"
 
     Write-Host 'PASS: PowerShell parsing, taskbar identity and Start menu shortcut creation, multi-size app/tray icon loading, built-in .NET SHA-256 hashing, configured JAVA_HOME, paths with spaces, build freshness, scanner binding, non-interactive ambiguity handling, UI creation/resizing, asynchronous operation completion/cancellation, inherited-output-handle completion, progressive and selected-project status refresh, the add-projects picker and rename prompt, and expected failure behavior.'
 }

@@ -1025,9 +1025,8 @@ function Select-SavedProjectAction {
 
         if ($null -ne $dashboardState.StatusRefresh -or $null -ne $dashboardState.Operation) { return }
         $projects = @(Get-SavedProjects)
-        $targets = if (@($Only).Count -gt 0) {
-            @($projects | Where-Object { $project = $_; @($Only | Where-Object { $_ -ieq $project }).Count -gt 0 })
-        } else { $projects }
+        # Typed so one project stays an array; StatusRefresh indexes Projects[0].
+        [string[]]$targets = @(Get-DroidRunProjectsToCheck -Projects $projects -Only $Only)
         $names = Get-DroidRunProjectNames -NamesPath $namesPath
         $selectedBefore = @(& $selectedPaths)
         $cached = @{}
