@@ -74,13 +74,17 @@ def describe(root: Path) -> tuple[str, str, bool]:
         if presets:
             return "Godot", "", True
         return "Godot", "No Android export preset yet (Project > Export in Godot).", False
-    if _has_android_manifest(root):
-        return "Gradle", "", True
-    return "Gradle", "No Android app module found (no AndroidManifest.xml).", False
+    if not _has_android_manifest(root):
+        return "Gradle", "No Android app module found (no AndroidManifest.xml).", False
+    if not backends.has_wrapper(root):
+        if backends.installed_gradle():
+            return "Gradle", "No Gradle wrapper; builds use the Gradle installed on PATH.", True
+        return "Gradle", "No Gradle wrapper, and no Gradle installed on PATH.", False
+    return "Gradle", "", True
 
 
 def _is_root(folder: Path) -> bool:
-    return any((folder / name).is_file() for name in (backends.CONFIG, "project.godot", "gradlew"))
+    return backends.is_build_root(folder)
 
 
 def discover(folder: str, max_depth: int = DISCOVERY_DEPTH,

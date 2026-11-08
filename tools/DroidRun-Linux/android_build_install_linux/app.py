@@ -1192,7 +1192,7 @@ class MainWindow(QMainWindow):
             answer = QMessageBox.question(
                 self, "No projects found",
                 f"No Android projects were found in {display_path(found.root)}.\n\nDroidRun looks up to "
-                f"{projects.DISCOVERY_DEPTH} folders deep for gradlew, project.godot, or "
+                f"{projects.DISCOVERY_DEPTH} folders deep for gradlew, settings.gradle(.kts), project.godot, or "
                 f"{backends.CONFIG}. Add this folder anyway? You can set up a custom build for it "
                 "later in Settings.",
                 QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)

@@ -568,6 +568,33 @@ def log_file(project: str) -> Path:
     return root / f"{dt.datetime.now().strftime('%Y%m%d-%H%M%S')}-{Path(project).name.replace(' ', '_')}.log"
 
 
+def _retry_gradle_after_missing_cache(argv: list[str], result: subprocess.CompletedProcess[str],
+                                      gradle_root: Path, env: dict[str, str],
+                                      emit: Callable[[str], None],
+                                      controller: ProcessController | None,
+                                      log: Path) -> subprocess.CompletedProcess[str]:
+    """Retry once when Gradle failed only because its download cache lost files."""
+    missing = backends.missing_gradle_cache_files(result.stdout)
+    if not missing:
+        return result
+    emit("")
+    emit(f"DroidRun: Gradle's download cache is missing {len(missing)} file(s) the build expected, "
+         "for example:")
+    emit(f"  {missing[0]}")
+    emit("DroidRun: stopping Gradle daemons and retrying once with fresh dependency resolution. "
+         "Nothing in the Gradle cache is deleted.")
+    run([argv[0], "--stop"], cwd=gradle_root, env=env, stream=emit, controller=controller)
+    retry = run([*argv, *backends.gradle_recovery_arguments(result.stdout)], cwd=gradle_root,
+                env=env, stream=emit, controller=controller)
+    if retry.returncode:
+        still_missing = backends.missing_gradle_cache_files(retry.stdout)
+        if still_missing:
+            raise ToolError(f"{backends.gradle_cache_repair_message(still_missing)}\nSee {log}")
+    else:
+        emit("DroidRun: the retry succeeded; Gradle re-downloaded the missing files.")
+    return retry
+
+
 def build_install(project: str, *, sync: bool = False, force_build: bool = True,
                   stream: Callable[[str], None] | None = None,
                   controller: ProcessController | None = None) -> str:
@@ -612,6 +639,8 @@ def build_install(project: str, *, sync: bool = False, force_build: bool = True,
             plan.apk.parent.mkdir(parents=True, exist_ok=True)
             previous_output = plan.apk.stat() if plan.apk.is_file() else None
         result = run(argv, cwd=gradle_root, env=env, stream=emit, controller=controller)
+        if result.returncode and plan.backend == "gradle":
+            result = _retry_gradle_after_missing_cache(argv, result, gradle_root, env, emit, controller, log)
         if result.returncode:
             raise ToolError(f"{plan.backend} failed with exit code {result.returncode}. See {log}")
         if plan.apk:

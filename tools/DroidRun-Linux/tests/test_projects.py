@@ -124,3 +124,27 @@ class ScopeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WrapperlessDiscoveryTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.repo = Path(self.temp.name) / "codex fuel"
+        touch(self.repo / "android" / "settings.gradle.kts", 'rootProject.name = "x"\n')
+        touch(self.repo / "android" / "app" / "src" / "main" / "AndroidManifest.xml")
+
+    def test_a_settings_file_without_a_wrapper_is_listed(self):
+        from android_build_install_linux import backends
+        with mock.patch.object(backends, "installed_gradle", return_value="/usr/bin/gradle"):
+            found = pr.discover(str(self.repo))
+        self.assertEqual([c.relative for c in found.candidates], ["android"])
+        self.assertTrue(found.candidates[0].recommended)
+        self.assertIn("No Gradle wrapper", found.candidates[0].note)
+
+    def test_no_wrapper_and_no_installed_gradle_is_not_recommended(self):
+        from android_build_install_linux import backends
+        with mock.patch.object(backends, "installed_gradle", return_value=""):
+            candidate = pr.discover(str(self.repo)).candidates[0]
+        self.assertFalse(candidate.recommended)
+        self.assertIn("no Gradle installed", candidate.note)

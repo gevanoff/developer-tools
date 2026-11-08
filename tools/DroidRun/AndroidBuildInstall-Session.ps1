@@ -296,7 +296,7 @@ function Select-ProjectsToAdd {
 
     if ($candidates.Count -eq 0) {
         $answer = [System.Windows.Forms.MessageBox]::Show($Owner,
-            "No Android projects were found in $($found.Root).`n`nDroidRun looks up to 4 folders deep for gradlew.bat, project.godot, or android-build-install.json. Add this folder anyway? You can set up a custom build for it later in Settings.",
+            "No Android projects were found in $($found.Root).`n`nDroidRun looks up to 4 folders deep for gradlew.bat, settings.gradle(.kts), project.godot, or android-build-install.json. Add this folder anyway? You can set up a custom build for it later in Settings.",
             'No projects found', [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Question, [System.Windows.Forms.MessageBoxDefaultButton]::Button2)
         if ($answer -eq [System.Windows.Forms.DialogResult]::Yes) { return $found.Root }

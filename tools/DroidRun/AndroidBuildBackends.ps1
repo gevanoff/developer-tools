@@ -1,6 +1,32 @@
 # Shared by the builder, status reader, device scanner and settings dialog.
 # Loading this file never executes a project command.
 
+# A Gradle build is rooted at its settings file even when the repository does not
+# commit the Gradle wrapper. Keep in step with android_build_install_linux/backends.py.
+$script:AndroidGradleSettingsFiles = @('settings.gradle', 'settings.gradle.kts')
+$script:AndroidBuildRootMarkers = @('android-build-install.json', 'project.godot', 'gradlew.bat') + $script:AndroidGradleSettingsFiles
+$script:AndroidNoGradleMessage = "This Gradle project has no wrapper (gradlew.bat) and no installed Gradle was found on PATH. Add the Gradle wrapper to the repository (run 'gradle wrapper' once and commit the files), or install Gradle and add it to PATH."
+
+function Test-AndroidBuildRootMarker {
+    param([string]$Path)
+    foreach ($marker in $script:AndroidBuildRootMarkers) {
+        if (Test-Path -LiteralPath (Join-Path $Path $marker) -PathType Leaf) { return $true }
+    }
+    return $false
+}
+
+function Test-AndroidGradleWrapper {
+    param([string]$Root)
+    return [bool](Test-Path -LiteralPath (Join-Path $Root 'gradlew.bat') -PathType Leaf)
+}
+
+function Get-AndroidInstalledGradle {
+    # The Gradle on PATH (gradle.bat), used only when a project has no wrapper.
+    $command = Get-Command 'gradle' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command) { return [string]$command.Source }
+    return ''
+}
+
 function Get-AndroidBuildConfig {
     param([string]$Root)
     $path = Join-Path $Root 'android-build-install.json'
@@ -36,11 +62,7 @@ function Get-AndroidProjectRoots {
     $queue.Enqueue(@{ Path = [IO.Path]::GetFullPath($Root); Depth = 0 })
     while ($queue.Count) {
         $node = $queue.Dequeue()
-        $found = $false
-        foreach ($marker in @('android-build-install.json', 'project.godot', 'gradlew.bat')) {
-            if (Test-Path -LiteralPath (Join-Path $node.Path $marker) -PathType Leaf) { $found = $true; break }
-        }
-        if ($found) { $node.Path; continue }
+        if (Test-AndroidBuildRootMarker -Path $node.Path) { $node.Path; continue }
         if ($node.Depth -ge $MaxDepth) { continue }
         foreach ($child in Get-ChildItem -LiteralPath $node.Path -Directory -ErrorAction SilentlyContinue) {
             if ($child.Name -in @('.git', '.gradle', '.godot', '.idea', 'build', 'node_modules', 'out', '.venv', 'venv')) { continue }
@@ -80,10 +102,19 @@ function Get-AndroidBuildPlan {
         $backend = if (Test-Path -LiteralPath (Join-Path $Root 'project.godot') -PathType Leaf) { 'godot' } else { 'gradle' }
     }
     if ($backend -ceq 'gradle') {
-        if (-not (Test-Path -LiteralPath (Join-Path $Root 'gradlew.bat') -PathType Leaf)) {
-            throw 'No Gradle wrapper. Configure backend: custom in android-build-install.json.'
+        if (Test-AndroidGradleWrapper -Root $Root) {
+            return [pscustomobject]@{ Root = $Root; Backend = $backend; Executable = ''; Arguments = @(); Apk = $null }
         }
-        return [pscustomobject]@{ Root = $Root; Backend = $backend; Executable = ''; Arguments = @(); Apk = $null }
+        $hasSettings = $false
+        foreach ($name in $script:AndroidGradleSettingsFiles) {
+            if (Test-Path -LiteralPath (Join-Path $Root $name) -PathType Leaf) { $hasSettings = $true }
+        }
+        if (-not $hasSettings) {
+            throw 'No Gradle wrapper or settings.gradle(.kts) in the build root. Select the Gradle project folder, or configure backend: custom in android-build-install.json.'
+        }
+        $gradle = Get-AndroidInstalledGradle
+        if (-not $gradle) { throw $script:AndroidNoGradleMessage }
+        return [pscustomobject]@{ Root = $Root; Backend = $backend; Executable = $gradle; Arguments = @(); Apk = $null }
     }
     if ($backend -cnotin @('godot', 'custom')) { throw "Unsupported backend: $backend. Use auto, gradle, godot or custom." }
     $output = $config.apk
@@ -114,7 +145,9 @@ function Get-AndroidBuildPlan {
 function Resolve-AndroidBuildCommand {
     param($Plan, [string]$GradleTask)
     if ($Plan.Backend -eq 'gradle') {
-        return [pscustomobject]@{ Executable = (Join-Path $Plan.Root 'gradlew.bat'); Arguments = @($GradleTask, '--stacktrace') }
+        # No wrapper: the installed Gradle that Get-AndroidBuildPlan chose.
+        $gradle = if ($Plan.Executable) { $Plan.Executable } else { Join-Path $Plan.Root 'gradlew.bat' }
+        return [pscustomobject]@{ Executable = $gradle; Arguments = @($GradleTask, '--stacktrace') }
     }
     $executable = $Plan.Executable
     if (-not $executable) {
@@ -143,4 +176,58 @@ function Assert-AndroidBackendApkPreference {
         $path = if ([IO.Path]::IsPathRooted($Preferred)) { [IO.Path]::GetFullPath($Preferred) } else { [IO.Path]::GetFullPath((Join-Path $ProjectRoot $Preferred)) }
         if ($path -ine $Plan.Apk) { throw 'Preferred APK conflicts with the backend output. Clear Preferred APK or match the configured apk.' }
     }
+}
+
+# ----- Gradle download-cache recovery -----------------------------------------------
+# A Gradle daemon or a reused configuration-cache entry can still point at library files
+# that have since disappeared from %USERPROFILE%\.gradle\caches (cache cleanup,
+# antivirus, a disk cleaner). The build then fails in seconds with FileNotFoundException
+# for those paths. DroidRun retries such a build once with fresh dependency resolution.
+# It never deletes anything in the Gradle cache. Keep in step with backends.py.
+
+function Get-GradleMissingCacheFiles {
+    # Paths under a Gradle caches folder that the build reported as missing, in order.
+    param([string[]]$Lines)
+    $found = New-Object System.Collections.Generic.List[string]
+    foreach ($line in $Lines) {
+        if ("$line" -notmatch '(?:FileNotFoundException|NoSuchFileException):\s*(.+?)\s*$') { continue }
+        $path = ($matches[1] -replace '\s*\((?:The system cannot find the (?:path|file) specified|No such file or directory)\)?\.?$', '').Trim()
+        if ($path -match '[\\/]caches[\\/]' -and -not $found.Contains($path)) { $found.Add($path) }
+    }
+    return $found.ToArray()
+}
+
+function Get-GradleRecoveryArguments {
+    # Extra arguments for the single retry after a missing-cache-file failure. Only
+    # builds that used the configuration cache get --no-configuration-cache; it is what
+    # replays the stale file list without re-checking it.
+    param([string[]]$Lines)
+    $arguments = @('--refresh-dependencies')
+    if ((@($Lines) -join "`n") -match '(?i)configuration cache') { $arguments = @('--no-configuration-cache') + $arguments }
+    return $arguments
+}
+
+function Get-GradleCacheEntries {
+    # Folders to clear by hand: group\artifact\version for downloaded modules,
+    # otherwise the folder that held the missing file.
+    param([string[]]$Paths)
+    $entries = New-Object System.Collections.Generic.List[string]
+    foreach ($path in $Paths) {
+        $parts = @($path -split '[\\/]')
+        $separator = if ($path.Contains('\')) { '\' } else { '/' }
+        $index = [Array]::IndexOf($parts, 'files-2.1')
+        $entry = if ($index -ge 0 -and $parts.Count -gt $index + 3) { $parts[0..($index + 3)] -join $separator }
+            elseif ($parts.Count -gt 1) { $parts[0..($parts.Count - 2)] -join $separator }
+            else { '' }
+        if ($entry -and -not $entries.Contains($entry)) { $entries.Add($entry) }
+    }
+    return $entries.ToArray()
+}
+
+function Get-GradleCacheRepairMessage {
+    param([string[]]$Paths)
+    $entries = @(Get-GradleCacheEntries -Paths $Paths)
+    $shown = @($entries | Select-Object -First 8 | ForEach-Object { "  $_" }) -join "`n"
+    $more = if ($entries.Count -gt 8) { "`n  ...and $($entries.Count - 8) more" } else { '' }
+    return "Gradle's download cache is still missing files after a fresh retry. Close Android Studio and other Gradle builds, delete these cache folders (Gradle downloads them again), and run DroidRun again:`n$shown$more"
 }
