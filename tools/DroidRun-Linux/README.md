@@ -15,7 +15,8 @@ It preserves the same operating model:
 - adb install -r without automatic uninstall;
 - optional app auto-launch;
 - timestamped logs;
-- live operation output in a desktop dashboard;
+- live operation output in a desktop dashboard with Running/Done/Failed/Cancelled states;
+- the same dark theme, status-chip colours, and Sync & Run preview as the Windows dashboard (see its README's *Dashboard layout*);
 - cancellation of active Gradle/Git/ADB subprocess groups;
 - read-only device scan and report browsing.
 
@@ -98,9 +99,11 @@ Multiple build roots, multiple devices without a preference, or ambiguous APK ou
 
 Sync & Run, Build & Install, and Git Pull expose a Cancel action while a cancellable subprocess is active. The Linux implementation starts streamed commands in their own process group and sends SIGTERM to that group, so Gradle/ADB descendants are cancelled with the parent operation instead of being orphaned.
 
+Cancel stays disabled while cancellation is pending and is available again when the next operation starts.
+
 ## Device scan and reports
 
-Scan Device performs a read-only status pass over saved projects and reports the current local-build/device relationship without rebuilding or installing.
+Scan Device performs a read-only status pass over saved projects and shows a table of the current local-build/device relationship without rebuilding or installing.
 
 Reports opens the XDG state log directory containing timestamped operation logs.
 
@@ -118,8 +121,16 @@ The Linux and Windows implementations share Gradle, Godot 4, and custom build be
 
 See [Godot and custom builds](../DroidRun/BUILD-BACKENDS.md) for setup and the shared configuration schema. Settings → Godot / custom build opens the configuration editor.
 
-The Git column includes the checked-out branch alongside its status, for example
-`main | Current` or `feature/camera-flip | Dirty`. Detached checkouts show
-`detached @ <short SHA>`. Hover over the row/cell to read the full branch name
-and status details if the column is truncated. Branch identity is local and
+The Git column shows the checked-out branch before its status chip, for example
+`main` with **Current** or `feature/camera-flip` with **Dirty**. Detached checkouts show
+`detached @ <short SHA>`. Hover over the row to read the full branch name
+and status details if the column is truncated.
+
+## Dashboard
+
+- Select a project to see what Sync & Run will do from the last check (for example *Pull 2 commits → Build → Install → Launch*) or why it will stop and how to fix it. Enter or a double-click runs Sync & Run.
+- Refresh Status (Ctrl+R or F5) fetches Git remotes and checks each project in turn; **Stop refresh** stops after the current project. After an operation only that project is rechecked, without fetching.
+- Failures and cancellations appear in the operation panel; expected tool errors are shown without a Python traceback.
+- Remove asks first and never changes the folder or its saved settings.
+- Settings can browse for the APK and JDK, choose among several connected devices, and checks that JAVA_HOME contains bin/java before saving. Branch identity is local and
 remains available when remote or build-configuration checks fail.
