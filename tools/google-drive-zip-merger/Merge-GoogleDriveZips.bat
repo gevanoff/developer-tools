@@ -1,20 +1,17 @@
 @echo off
 setlocal
 
+rem Double-click to open the merger, or drag the folder of ZIP files onto this file.
 if "%~1"=="" (
-    powershell.exe -NoProfile -ExecutionPolicy Bypass ^
+    powershell.exe -NoProfile -STA -ExecutionPolicy Bypass ^
         -File "%~dp0Merge-GoogleDriveZips.ps1"
 ) else (
-    powershell.exe -NoProfile -ExecutionPolicy Bypass ^
+    powershell.exe -NoProfile -STA -ExecutionPolicy Bypass ^
         -File "%~dp0Merge-GoogleDriveZips.ps1" ^
         -Source "%~1"
 )
 
 set "EXIT_CODE=%ERRORLEVEL%"
-
-echo.
-if not "%EXIT_CODE%"=="0" (
-    echo The tool exited with an error.
-)
-pause
+rem The window shows the result. Keep this console open only if PowerShell itself failed.
+if not "%EXIT_CODE%"=="0" if not "%EXIT_CODE%"=="1" pause
 exit /b %EXIT_CODE%

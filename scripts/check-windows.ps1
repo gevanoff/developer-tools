@@ -40,6 +40,8 @@ try {
         & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File ./CodexMeter.ps1 -SelfTest
         Assert-Exit 'Codex meter self test'
     } finally { Pop-Location }
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'tools/google-drive-zip-merger/Test-MergeGoogleDriveZips.ps1')
+    Assert-Exit 'Google Drive ZIP merger'
     & python -m unittest discover -s tools/kindle-epub-transfer -p 'test_*.py' -v
     Assert-Exit 'Kindle EPUB unit tests'
     $parseErrors = $null
