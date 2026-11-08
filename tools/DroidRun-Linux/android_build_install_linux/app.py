@@ -811,6 +811,7 @@ class MainWindow(QMainWindow):
         self.operation_label = label
         self.operation_started = time.monotonic()
         self.controller.reset()
+        self.cancel_button.setEnabled(True)
         self.output.clear()
         self.set_operation_state("running", label, "0:00 elapsed")
         self.elapsed_timer.start()

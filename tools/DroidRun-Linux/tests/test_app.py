@@ -106,6 +106,29 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(self.window.operation_state, "success")
         self.assertEqual(calls, [(self.projects[0], False)])
 
+    def test_cancel_is_reenabled_for_each_new_operation(self):
+        self.select(self.projects[0])
+        # Keep the worker pending so clicks and completion are deterministic.
+        with mock.patch.object(self.window, "_launch") as launch, \
+                mock.patch.object(self.window, "refresh"):
+            for _ in range(2):
+                self.window.sync_run()
+                self.assertTrue(self.window.busy)
+                self.assertFalse(self.window.controller.cancelled)
+                self.assertFalse(self.window.cancel_button.isHidden())
+                self.assertTrue(self.window.cancel_button.isEnabled())
+                self.window.cancel_button.click()
+                self.assertTrue(self.window.controller.cancelled)
+                self.assertFalse(self.window.cancel_button.isEnabled())
+                # An unrelated controls update must not re-enable a pending cancel.
+                self.window.update_controls()
+                self.assertFalse(self.window.cancel_button.isEnabled())
+                failed = launch.call_args.args[2]
+                failed((core.OperationCancelled("Cancelled"), ""))
+                self.assertFalse(self.window.busy)
+                self.assertEqual(self.window.operation_state, "cancelled")
+                self.assertTrue(self.window.cancel_button.isHidden())
+
     def test_remove_asks_first_and_keeps_the_project_on_cancel(self):
         self.select(self.projects[1])
         with mock.patch.object(QMessageBox, "question", return_value=QMessageBox.Cancel):

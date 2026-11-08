@@ -99,6 +99,8 @@ Multiple build roots, multiple devices without a preference, or ambiguous APK ou
 
 Sync & Run, Build & Install, and Git Pull expose a Cancel action while a cancellable subprocess is active. The Linux implementation starts streamed commands in their own process group and sends SIGTERM to that group, so Gradle/ADB descendants are cancelled with the parent operation instead of being orphaned.
 
+Cancel stays disabled while cancellation is pending and is available again when the next operation starts.
+
 ## Device scan and reports
 
 Scan Device performs a read-only status pass over saved projects and shows a table of the current local-build/device relationship without rebuilding or installing.
