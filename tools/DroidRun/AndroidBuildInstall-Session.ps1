@@ -1092,7 +1092,7 @@ function Select-SavedProjectAction {
         $wasCancelled = $operation.Runner.CancellationRequested
         if ($wasCancelled) {
             $resultMessage = "$($operation.DisplayName) cancelled after $elapsedText."
-            $view.SetOperationState('cancelled', "$($operation.DisplayName) cancelled", "after $elapsedText. Nothing after the stop point ran.")
+            $view.SetOperationState('cancelled', "$($operation.DisplayName) cancelled", "after $elapsedText. The process tree was stopped; the output shows which steps finished.")
             & $appendOperationOutput @('', "Cancelled. Exit code: $exitCode")
         }
         elseif ($exitCode -eq 0) {
