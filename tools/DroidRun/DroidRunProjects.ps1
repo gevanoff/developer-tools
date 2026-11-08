@@ -8,10 +8,7 @@ $script:DroidRunNameLimit = 80
 
 function Test-DroidRunBuildRoot {
     param([string]$Path)
-    foreach ($marker in @('android-build-install.json', 'project.godot', 'gradlew.bat')) {
-        if (Test-Path -LiteralPath (Join-Path $Path $marker) -PathType Leaf) { return $true }
-    }
-    return $false
+    return Test-AndroidBuildRootMarker -Path $Path
 }
 
 function Get-DroidRunChildFolders {
@@ -57,10 +54,16 @@ function Get-DroidRunProjectKind {
         if ($presets.Count -gt 0) { return [pscustomobject]@{ Kind = 'Godot'; Note = ''; Recommended = $true } }
         return [pscustomobject]@{ Kind = 'Godot'; Note = 'No Android export preset yet (Project > Export in Godot).'; Recommended = $false }
     }
-    if (Test-DroidRunAndroidManifest -Root $Root) {
-        return [pscustomobject]@{ Kind = 'Gradle'; Note = ''; Recommended = $true }
+    if (-not (Test-DroidRunAndroidManifest -Root $Root)) {
+        return [pscustomobject]@{ Kind = 'Gradle'; Note = 'No Android app module found (no AndroidManifest.xml).'; Recommended = $false }
     }
-    return [pscustomobject]@{ Kind = 'Gradle'; Note = 'No Android app module found (no AndroidManifest.xml).'; Recommended = $false }
+    if (-not (Test-AndroidGradleWrapper -Root $Root)) {
+        if (Get-AndroidInstalledGradle) {
+            return [pscustomobject]@{ Kind = 'Gradle'; Note = 'No Gradle wrapper; builds use the Gradle installed on PATH.'; Recommended = $true }
+        }
+        return [pscustomobject]@{ Kind = 'Gradle'; Note = 'No Gradle wrapper, and no Gradle installed on PATH.'; Recommended = $false }
+    }
+    return [pscustomobject]@{ Kind = 'Gradle'; Note = ''; Recommended = $true }
 }
 
 function Find-DroidRunProjects {

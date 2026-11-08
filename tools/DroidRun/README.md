@@ -19,7 +19,7 @@ Build Android projects with Gradle, Godot 4, or a configured custom builder, kee
 - Windows 11
 - Windows PowerShell 5.1 or later
 - Git for Windows for Git status/update features
-- a Gradle project containing `gradlew.bat`, a Godot 4 project, or a configured custom build
+- a Gradle project containing `gradlew.bat` (a project without the wrapper, recognized by `settings.gradle` or `settings.gradle.kts`, needs Gradle installed on PATH), a Godot 4 project, or a configured custom build
 - the selected backend's toolchain (a compatible JDK for Gradle; Godot editor/export templates for Godot)
 - Android SDK Platform-Tools (`adb.exe`)
 - Android SDK Build-Tools (`aapt2.exe` or `aapt.exe`) for package inspection, device comparison, and auto-launch
@@ -52,10 +52,10 @@ The available actions are:
 
 ## Adding projects
 
-**Add Project...** asks for a folder, then searches it up to four folders deep for projects DroidRun can build: Gradle (`gradlew.bat`), Godot (`project.godot`), or a custom build (`android-build-install.json`). Build, tool, and dependency folders (`build`, `.gradle`, `node_modules`, ...) are skipped, and a project's own subfolders are not searched further.
+**Add Project...** asks for a folder, then searches it up to four folders deep for projects DroidRun can build: Gradle (`gradlew.bat`, or `settings.gradle` / `settings.gradle.kts` when the repository has no wrapper), Godot (`project.godot`), or a custom build (`android-build-install.json`). Build, tool, and dependency folders (`build`, `.gradle`, `node_modules`, ...) are skipped, and a project's own subfolders are not searched further.
 
 - If the folder you chose is itself a project, it is added straight away.
-- Otherwise a list shows every project found, with its kind and where it is. Projects that look ready are checked. Projects that may not build yet stay unchecked, with the reason underneath: a Gradle project with no `AndroidManifest.xml`, a Godot project with no Android export preset, or a build configuration with errors. Projects already in DroidRun are shown but cannot be added twice. Choose the ones you want and click **Add**.
+- Otherwise a list shows every project found, with its kind and where it is. Projects that look ready are checked. Projects that may not build yet stay unchecked, with the reason underneath: a Gradle project with no `AndroidManifest.xml`, a Gradle project with no wrapper and no Gradle installed on PATH, a Godot project with no Android export preset, or a build configuration with errors. Projects already in DroidRun are shown but cannot be added twice. Choose the ones you want and click **Add**.
 - If you chose a module folder inside a project (for example `app\src`), DroidRun offers the enclosing project instead.
 - If nothing is found, DroidRun asks before adding the folder anyway, so you can configure a custom build for it later.
 
@@ -220,7 +220,7 @@ prism-break/
         gradlew.bat
 ```
 
-The tool searches for `gradlew.bat` in the selected directory and up to two directory levels below it. If multiple Gradle roots exist, explicit Build & Install may ask which one to use; Sync & Run treats an ambiguous project layout as a condition requiring attention.
+The tool searches for `gradlew.bat` (or, without a wrapper, `settings.gradle` / `settings.gradle.kts`) in the selected directory and up to two directory levels below it. If multiple Gradle roots exist, explicit Build & Install may ask which one to use; Sync & Run treats an ambiguous project layout as a condition requiring attention.
 
 ## Saved projects
 
@@ -335,6 +335,19 @@ After a successful build the tool searches Android module output directories und
 ```text
 build\outputs\apk
 ```
+
+A Gradle project that does not commit the wrapper (no `gradlew.bat`) is built with the Gradle installed on PATH (`gradle.bat assembleDebug --stacktrace`); the project card shows *Configuration needed* with both fixes when no Gradle is installed. A committed wrapper always takes precedence, and committing one is the more reproducible fix because it pins the Gradle version.
+
+### Broken Gradle download cache
+
+Gradle keeps downloaded libraries in `%USERPROFILE%\.gradle\caches`. If files there disappear (Gradle's own cache cleanup, a disk cleaner, antivirus), a running Gradle daemon or a reused configuration-cache entry can still expect them, and the build fails within seconds with `FileNotFoundException` for paths under `.gradle\caches`.
+
+DroidRun recognizes that failure and retries the build **once**:
+
+1. `gradlew.bat --stop` stops the Gradle daemons for that Gradle version (this also ends daemons other builds, such as Android Studio, were using; they restart on demand).
+2. The same task runs again with `--refresh-dependencies`, plus `--no-configuration-cache` when the failed build used the configuration cache, so Gradle re-checks and re-downloads what is missing.
+
+The log says when this happens. DroidRun never deletes anything in the Gradle cache. If the retry fails the same way, the run stops and names the cache folders (for example `...\files-2.1\io.coil-kt\coil\2.7.0`) to delete by hand before running again. Other build failures are never retried.
 
 If there is one debug APK it is selected automatically. When several exist, the saved preferred APK is used if it exactly matches a produced APK; otherwise explicit Build & Install asks which one to install.
 

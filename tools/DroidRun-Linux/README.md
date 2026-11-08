@@ -25,7 +25,7 @@ It preserves the same operating model:
 - Python 3.10 or newer
 - python3-venv
 - Git
-- a Gradle project with an executable gradlew and compatible JDK, a Godot 4 project, or a configured custom build
+- a Gradle project with an executable gradlew and compatible JDK (a project without the wrapper, recognized by settings.gradle or settings.gradle.kts, needs Gradle installed on PATH), a Godot 4 project, or a configured custom build
 - Android SDK Platform-Tools (adb)
 - Android SDK Build-Tools (aapt2 or aapt) for package inspection/comparison
 - an Android device with USB debugging enabled
@@ -95,6 +95,10 @@ The optimized path:
 
 Multiple build roots, multiple devices without a preference, or ambiguous APK outputs are treated as errors rather than guessed.
 
+## Broken Gradle download cache
+
+When a Gradle build fails only because files under `~/.gradle/caches` have disappeared (`FileNotFoundException` or `NoSuchFileException` for cache paths), DroidRun runs `gradlew --stop` and retries once with `--refresh-dependencies` (plus `--no-configuration-cache` when the build used the configuration cache). It never deletes cache files; if the retry fails the same way, it names the cache folders to delete by hand. Other failures are not retried. The rules match the Windows README's *Broken Gradle download cache*.
+
 ## Cancellation
 
 Sync & Run, Build & Install, and Git Pull expose a Cancel action while a cancellable subprocess is active. The Linux implementation starts streamed commands in their own process group and sends SIGTERM to that group, so Gradle/ADB descendants are cancelled with the parent operation instead of being orphaned.
@@ -129,7 +133,7 @@ and status details if the column is truncated.
 ## Dashboard
 
 - Select a project to see what Sync & Run will do from the last check (for example *Pull 2 commits → Build → Install → Launch*) or why it will stop and how to fix it. Enter or a double-click runs Sync & Run.
-- **Add project…** asks for a repository or project folder and lists the Android projects inside it (Gradle `gradlew`, Godot `project.godot`, or `android-build-install.json`, up to four folders deep). Ready-looking projects are checked; ones that may not build yet are unchecked with the reason; ones already added can't be added twice. A folder that is itself a project is added straight away, and a module folder offers its enclosing project. The rules match the Windows README's *Adding projects*.
+- **Add project…** asks for a repository or project folder and lists the Android projects inside it (Gradle `gradlew` or, without a wrapper, `settings.gradle(.kts)`; Godot `project.godot`; or `android-build-install.json`, up to four folders deep). Ready-looking projects are checked; ones that may not build yet are unchecked with the reason; ones already added can't be added twice. A folder that is itself a project is added straight away, and a module folder offers its enclosing project. The rules match the Windows README's *Adding projects*.
 - **Rename…** (F2) changes the name DroidRun shows; leave it empty to use the folder name. The folder is never renamed. Names are stored in `~/.config/android-build-install/project-names.json`.
 - Several projects can be selected (Ctrl/Shift+click, Ctrl+A). The refresh button checks the selected projects (**Refresh Selected**, **Refresh N Selected**), or every project when none is selected (**Refresh All**). Nothing is selected at start; Esc clears the selection. Ctrl+R or F5 does the same; **Stop refresh** stops after the current project. After an operation only that project is rechecked, without fetching.
 - Failures and cancellations appear in the operation panel; expected tool errors are shown without a Python traceback.

@@ -110,6 +110,32 @@ function Invoke-NativeCaptured {
     }
 }
 
+function Invoke-NativeStreamed {
+    # Runs a build step with its output passed straight through (shown live and recorded
+    # by the logging wrapper, as before) while also keeping it in Lines for diagnosis.
+    # Read $LASTEXITCODE after it returns.
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$Arguments = @(),
+        [System.Collections.Generic.List[string]]$Lines
+    )
+
+    Write-Host "Running: $FilePath $($Arguments -join ' ')"
+    Write-Host ''
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $FilePath @Arguments 2>&1 | ForEach-Object {
+            $line = "$_"
+            if ($null -ne $Lines) { $Lines.Add($line) }
+            $line
+        }
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+}
+
 function Get-GradleRoots {
     param([string]$Root, [int]$MaxDepth = 2)
     Get-AndroidProjectRoots -Root $Root -MaxDepth $MaxDepth
@@ -489,17 +515,36 @@ try {
         }
         Push-Location $gradleRoot
         try {
-            Write-Host "Running: $($buildCommand.Executable) $($buildCommand.Arguments -join ' ')"
-            Write-Host ''
-            $previousPreference = $ErrorActionPreference
-            try {
-                $ErrorActionPreference = 'Continue'
-                $buildArguments = @($buildCommand.Arguments)
-                & $buildCommand.Executable @buildArguments
-                $gradleExitCode = [int]$LASTEXITCODE
+            $buildArguments = @($buildCommand.Arguments)
+            $buildLines = New-Object System.Collections.Generic.List[string]
+            Invoke-NativeStreamed -FilePath $buildCommand.Executable -Arguments $buildArguments -Lines $buildLines
+            $gradleExitCode = [int]$LASTEXITCODE
+
+            # Gradle can fail in seconds because its download cache lost files that a daemon
+            # or a reused configuration-cache entry still expects. Retry that case once.
+            $missing = @()
+            if ($gradleExitCode -ne 0 -and $plan.Backend -eq 'gradle') {
+                $missing = @(Get-GradleMissingCacheFiles -Lines $buildLines.ToArray())
             }
-            finally {
-                $ErrorActionPreference = $previousPreference
+            if ($missing.Count -gt 0) {
+                Write-Host ''
+                Write-Host "DroidRun: Gradle's download cache is missing $($missing.Count) file(s) the build expected, for example:"
+                Write-Host "  $($missing[0])"
+                Write-Host 'DroidRun: stopping Gradle daemons and retrying once with fresh dependency resolution. Nothing in the Gradle cache is deleted.'
+                Invoke-NativeStreamed -FilePath $buildCommand.Executable -Arguments @('--stop')
+                $retryArguments = @($buildArguments) + @(Get-GradleRecoveryArguments -Lines $buildLines.ToArray())
+                $retryLines = New-Object System.Collections.Generic.List[string]
+                Invoke-NativeStreamed -FilePath $buildCommand.Executable -Arguments $retryArguments -Lines $retryLines
+                $gradleExitCode = [int]$LASTEXITCODE
+                if ($gradleExitCode -eq 0) {
+                    Write-Host 'DroidRun: the retry succeeded; Gradle re-downloaded the missing files.'
+                }
+                else {
+                    $stillMissing = @(Get-GradleMissingCacheFiles -Lines $retryLines.ToArray())
+                    if ($stillMissing.Count -gt 0) {
+                        throw "$(Get-GradleCacheRepairMessage -Paths $stillMissing)`nThe APK was not installed."
+                    }
+                }
             }
         }
         finally {

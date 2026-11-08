@@ -4,7 +4,7 @@ Both the Windows and Ubuntu/Linux dashboards support the same build contract.
 
 | Backend | Discovery | Build | APK selection |
 | --- | --- | --- | --- |
-| Gradle | `gradlew.bat` / executable `gradlew` | Existing task, default `assembleDebug` | Existing preferred/conventional output policy |
+| Gradle | `gradlew.bat` / executable `gradlew`; without a wrapper, `settings.gradle(.kts)` and Gradle on PATH | Existing task, default `assembleDebug`; one retry when Gradle's download cache lost files | Existing preferred/conventional output policy |
 | Godot 4 | `project.godot` | Headless debug export using an Android preset | Exact configured path; default `build/android/app-debug.apk` |
 | Custom | `android-build-install.json` with `backend: custom` | Explicit executable plus argument array | Required exact `apk` path |
 

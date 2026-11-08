@@ -10,6 +10,14 @@ from pathlib import Path
 
 CONFIG = "android-build-install.json"
 SKIP = {".git", ".gradle", ".godot", ".idea", "build", "node_modules", "out", ".venv", "venv"}
+WRAPPER = "gradlew"
+# A Gradle build is rooted at its settings file even when the repository does not
+# commit the Gradle wrapper. Keep in step with AndroidBuildBackends.ps1.
+GRADLE_SETTINGS = ("settings.gradle", "settings.gradle.kts")
+ROOT_MARKERS = (CONFIG, "project.godot", WRAPPER, *GRADLE_SETTINGS)
+NO_GRADLE_MESSAGE = ("This Gradle project has no wrapper (gradlew) and no installed Gradle was found on PATH. "
+                     "Add the Gradle wrapper to the repository (run 'gradle wrapper' once and commit the files), "
+                     "or install Gradle and add it to PATH.")
 
 
 class BackendError(RuntimeError):
@@ -48,12 +56,25 @@ def read_config(root: Path) -> dict:
         raise BackendError(f"Invalid {path}: {exc}") from exc
 
 
+def is_build_root(folder: Path) -> bool:
+    return any((folder / name).is_file() for name in ROOT_MARKERS)
+
+
+def has_wrapper(root: Path) -> bool:
+    return (root / WRAPPER).is_file()
+
+
+def installed_gradle() -> str:
+    """The Gradle on PATH, used only when a project has no wrapper."""
+    return shutil.which("gradle") or ""
+
+
 def find_roots(project: str, max_depth: int = 2) -> list[Path]:
     queue = [(Path(project).expanduser().resolve(), 0)]
     found = []
     while queue:
         root, depth = queue.pop(0)
-        if any((root / name).is_file() for name in (CONFIG, "project.godot", "gradlew")):
+        if is_build_root(root):
             found.append(root)
             continue  # Godot owns its generated Android/Gradle subtree.
         if depth < max_depth:
@@ -98,9 +119,16 @@ def plan_for_root(root: Path) -> BuildPlan:
     if backend == "auto":
         backend = "godot" if (root / "project.godot").is_file() else "gradle"
     if backend == "gradle":
-        if not (root / "gradlew").is_file():
-            raise BackendError("No Gradle wrapper. Configure backend: custom in android-build-install.json.")
-        return BuildPlan(root, backend)
+        if has_wrapper(root):
+            return BuildPlan(root, backend)
+        if not any((root / name).is_file() for name in GRADLE_SETTINGS):
+            raise BackendError("No Gradle wrapper or settings.gradle(.kts) in the build root. "
+                               "Select the Gradle project folder, or configure backend: custom in "
+                               "android-build-install.json.")
+        gradle = installed_gradle()
+        if not gradle:
+            raise BackendError(NO_GRADLE_MESSAGE)
+        return BuildPlan(root, backend, gradle)
     if backend not in {"godot", "custom"}:
         raise BackendError(f"Unsupported backend: {backend}. Use auto, gradle, godot or custom.")
     output = data.get("apk", "build/android/app-debug.apk" if backend == "godot" else "")
@@ -137,7 +165,9 @@ def select_plan(project: str) -> BuildPlan:
 
 def command(plan: BuildPlan, gradle_task: str) -> list[str]:
     if plan.backend == "gradle":
-        wrapper = plan.root / "gradlew"
+        if plan.executable:  # no wrapper: the installed Gradle chosen by plan_for_root
+            return [plan.executable, gradle_task, "--stacktrace"]
+        wrapper = plan.root / WRAPPER
         if not os.access(wrapper, os.X_OK):
             raise BackendError(f"Gradle wrapper is not executable: {wrapper}")
         return [str(wrapper), gradle_task, "--stacktrace"]
@@ -152,3 +182,82 @@ def command(plan: BuildPlan, gradle_task: str) -> list[str]:
         raise BackendError("Build executable not found or not executable. Configure executable in "
                            "android-build-install.json; Godot needs the Godot 4 editor binary.")
     return [executable, *plan.arguments]
+
+
+# ----- Gradle download-cache recovery -------------------------------------------------
+# A Gradle daemon or a reused configuration-cache entry can still point at library files
+# that have since disappeared from ~/.gradle/caches (cache cleanup, antivirus, a disk
+# cleaner). The build then fails in seconds with FileNotFoundException for those paths.
+# DroidRun retries such a build once with fresh dependency resolution. It never deletes
+# anything in the Gradle cache. Keep in step with AndroidBuildBackends.ps1.
+
+_MISSING_FILE = re.compile(r"(?:FileNotFoundException|NoSuchFileException):\s*(.+?)\s*$")
+_MISSING_SUFFIX = re.compile(
+    r"\s*\((?:The system cannot find the (?:path|file) specified|No such file or directory)\)?\.?$")
+# Only Gradle's own cache layout under GRADLE_USER_HOME counts: caches/modules-2/files-2.1
+# (downloads), caches/transforms-N, caches/jars-N, and version folders such as
+# caches/8.9/transforms. A project folder that happens to be called "caches" must never
+# match, because the repair message tells the user to delete what it names.
+_GRADLE_CACHE = re.compile(
+    r"[\\/]caches[\\/](?:modules-\d+[\\/]files-\d+\.\d+|transforms-\d+|jars-\d+|"
+    r"\d+\.\d+(?:\.\d+)?(?:-[^\\/]+)?[\\/](?:transforms|kotlin-dsl|groovy-dsl|"
+    r"generated-gradle-jars|scripts|scripts-remapped))[\\/]")
+
+
+def missing_gradle_cache_files(output: str) -> list[str]:
+    """Paths under a Gradle caches folder that the build reported as missing, in order."""
+    found: list[str] = []
+    for line in output.splitlines():
+        match = _MISSING_FILE.search(line)
+        if not match:
+            continue
+        path = _MISSING_SUFFIX.sub("", match.group(1)).strip()
+        if _GRADLE_CACHE.search(path) and path not in found:
+            found.append(path)
+    return found
+
+
+def gradle_recovery_arguments(output: str) -> list[str]:
+    """Extra arguments for the single retry after a missing-cache-file failure."""
+    arguments = ["--refresh-dependencies"]
+    # Only builds that use the configuration cache know this switch's meaning; it is
+    # what replays the stale file list without re-checking it.
+    if "configuration cache" in output.lower():
+        arguments.insert(0, "--no-configuration-cache")
+    return arguments
+
+
+def gradle_cache_entries(paths: list[str]) -> list[str]:
+    """Folders to clear by hand, all inside Gradle's caches folder: the
+    group/artifact/version folder for a downloaded module, or the single transform or
+    JAR cache entry (the folder directly under transforms-N, jars-N or
+    <version>/transforms) that held the missing file."""
+    entries: list[str] = []
+    for path in paths:
+        if not _GRADLE_CACHE.search(path):
+            continue
+        parts = re.split(r"[\\/]", path)
+        separator = "\\" if "\\" in path else "/"
+        caches = max(i for i, part in enumerate(parts) if part == "caches")
+        kind = parts[caches + 1]
+        if kind.startswith("modules-") and "files-2.1" in parts[caches:]:
+            end = parts.index("files-2.1", caches) + 4       # group/artifact/version
+        elif kind.startswith(("transforms-", "jars-")):
+            end = caches + 3                                 # caches/transforms-N/<entry>
+        else:
+            end = caches + 4                                 # caches/<version>/<cache>/<entry>
+        if end >= len(parts):                                # never name the file itself
+            end = len(parts) - 1
+        entry = separator.join(parts[:end])
+        if entry and entry not in entries:
+            entries.append(entry)
+    return entries
+
+
+def gradle_cache_repair_message(paths: list[str]) -> str:
+    entries = gradle_cache_entries(paths)
+    shown = "\n".join(f"  {entry}" for entry in entries[:8])
+    more = f"\n  ...and {len(entries) - 8} more" if len(entries) > 8 else ""
+    return ("Gradle's download cache is still missing files after a fresh retry. "
+            "Close Android Studio and other Gradle builds, delete these cache folders "
+            "(Gradle downloads them again), and run DroidRun again:\n" + shown + more)
