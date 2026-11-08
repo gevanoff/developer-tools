@@ -42,24 +42,50 @@ The available actions are:
 - **Build & Install** — always run the configured build, install the selected APK, and optionally launch it;
 - **Install APK...** — select a project, then choose any existing `.apk` file (including an APK built in a feature-branch worktree). Install that exact file using the project's device and auto-launch settings, without building, pulling Git, changing branches, or changing its preferred APK. Multiple devices still require an explicit device setting. Reopen DroidRun after updating to see the new button.
 - **Git Pull** — explicitly run the safe fast-forward-only repository update;
-- **Refresh Status** — refresh Git remote state, local APK freshness, and device comparison;
+- **Refresh All / Refresh Selected** — refresh Git remote state, local APK freshness, and device comparison for the selected projects, or for every project when none is selected;
 - **Settings...** — configure persistent project-specific defaults including a preferred device;
 - **Scan Device...** — show device/APK comparison details for all saved projects;
 - **Reports...** — inspect previous build/install logs;
-- **Add Project... / Remove...** — manage remembered repository paths. Remove asks first and never changes the folder or its saved settings.
+- **Add Project...** — choose a repository or project folder, then pick which of the Android projects inside it to add (see *Adding projects*);
+- **Rename...** — change the name DroidRun shows for a project;
+- **Remove...** — forget a project. Remove asks first and never changes the folder or its saved settings.
+
+## Adding projects
+
+**Add Project...** asks for a folder, then searches it up to four folders deep for projects DroidRun can build: Gradle (`gradlew.bat`), Godot (`project.godot`), or a custom build (`android-build-install.json`). Build, tool, and dependency folders (`build`, `.gradle`, `node_modules`, ...) are skipped, and a project's own subfolders are not searched further.
+
+- If the folder you chose is itself a project, it is added straight away.
+- Otherwise a list shows every project found, with its kind and where it is. Projects that look ready are checked. Projects that may not build yet stay unchecked, with the reason underneath: a Gradle project with no `AndroidManifest.xml`, a Godot project with no Android export preset, or a build configuration with errors. Projects already in DroidRun are shown but cannot be added twice. Choose the ones you want and click **Add**.
+- If you chose a module folder inside a project (for example `app\src`), DroidRun offers the enclosing project instead.
+- If nothing is found, DroidRun asks before adding the folder anyway, so you can configure a custom build for it later.
+
+New projects are selected and checked as soon as they are added.
+
+## Project names
+
+DroidRun shows each project under its folder name until you rename it. Select a project and click **Rename...** (or press F2). The name is used in the project list, the selected-project card, Settings, Reports, and Device scan. Leave the name empty to go back to the folder name. Renaming never renames the folder; names are stored in `project-names.json` next to the saved project list.
+
+## Refreshing some projects
+
+The project list allows several projects to be selected (Ctrl+click, Shift+click, or Ctrl+A). The refresh button names its scope:
+
+- **Refresh All** — nothing is selected, so every project is checked. Nothing is selected when DroidRun starts; press Esc in the list, or click an empty area, to clear the selection.
+- **Refresh Selected** / **Refresh N Selected** — only the selected projects are checked. The others keep their last result and time.
+
+Build, install, Git, Rename, Settings, and Remove act on exactly one selected project, so they are unavailable while several are selected.
 
 ## Dashboard layout
 
 The dashboard uses a dark navy theme with the lime accent from the icon:
 
-- **Header** — app name, status-refresh progress, and **Scan Device...**, **Reports...**, and **Refresh Status**.
+- **Header** — app name, status-refresh progress, and **Scan Device...**, **Reports...**, and the refresh button (**Refresh All** or **Refresh Selected**).
 - **Projects** — one row per saved project with its path, Git branch and status, Local Build, Device, and when it was last checked. Each status is a coloured chip; the text is always shown, so colour is never the only signal:
   - green: nothing to do (**Current**, **Fresh**, **Same**);
   - blue: Sync & Run will act on it (**Behind N**, **Stale**, **No APK**, **Different**, **Not installed**);
   - amber: needs a decision or setting (**Dirty**, **No upstream**, **Ambiguous**, **Choose device**, ...);
   - red: failed or unsafe (**Diverged**, **Fetch failed**, **Timed out**, ...);
   - grey: informational or not yet known (**Ahead N**, **Not Git**, **Unknown**, **Checking...**).
-- **Selected project** — what Sync & Run will do from the last check, for example *Sync & Run will: Pull 2 commits → Build → Install → Launch*, or why it will stop and how to fix it. The preview follows the same rules as Sync & Run but is based on the last status check; Sync & Run always re-checks before acting. Below it are the project's saved settings and its actions: **Sync & Run** (primary), **Build & Install**, **Git Pull**, **Install APK...**, **Settings...**, and **Remove...**.
+- **Selected project** — what Sync & Run will do from the last check, for example *Sync & Run will: Pull 2 commits → Build → Install → Launch*, or why it will stop and how to fix it. The preview follows the same rules as Sync & Run but is based on the last status check; Sync & Run always re-checks before acting. Below it are the project's saved settings and its actions: **Sync & Run** (primary), **Build & Install**, **Git Pull**, **Install APK...**, **Rename...**, **Settings...**, and **Remove...**. With several projects selected, the card lists them instead.
 - **Operation** — a Running / Stopping / Done / Failed / Cancelled badge, elapsed time, the result next to it, **Copy Output**, **Cancel**, and the live output.
 
 Windows high-contrast themes keep the system colours instead of the dark theme. The title bar and scroll bars follow the dark theme on Windows 10 1809 and later. The drawing code lives in `DroidRunUi.cs` and is compiled when the dashboard starts; the colour and preview rules live in `DroidRunPresentation.ps1` and match the Linux dashboard.
@@ -443,6 +469,12 @@ Status colours, the Sync & Run preview, and palette contrast (run by `scripts/ch
 
 ```powershell
 .\Test-DroidRunPresentation.ps1
+```
+
+Project discovery, display names, and refresh scope (same runners):
+
+```powershell
+.\Test-DroidRunProjects.ps1
 ```
 
 To check the dashboard layout and save screenshots with sample data at 900x680, 1180x760, and 1600x900 (no device or saved projects are used):

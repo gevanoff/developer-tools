@@ -129,7 +129,9 @@ and status details if the column is truncated.
 ## Dashboard
 
 - Select a project to see what Sync & Run will do from the last check (for example *Pull 2 commits → Build → Install → Launch*) or why it will stop and how to fix it. Enter or a double-click runs Sync & Run.
-- Refresh Status (Ctrl+R or F5) fetches Git remotes and checks each project in turn; **Stop refresh** stops after the current project. After an operation only that project is rechecked, without fetching.
+- **Add project…** asks for a repository or project folder and lists the Android projects inside it (Gradle `gradlew`, Godot `project.godot`, or `android-build-install.json`, up to four folders deep). Ready-looking projects are checked; ones that may not build yet are unchecked with the reason; ones already added can't be added twice. A folder that is itself a project is added straight away, and a module folder offers its enclosing project. The rules match the Windows README's *Adding projects*.
+- **Rename…** (F2) changes the name DroidRun shows; leave it empty to use the folder name. The folder is never renamed. Names are stored in `~/.config/android-build-install/project-names.json`.
+- Several projects can be selected (Ctrl/Shift+click, Ctrl+A). The refresh button checks the selected projects (**Refresh Selected**, **Refresh N Selected**), or every project when none is selected (**Refresh All**). Nothing is selected at start; Esc clears the selection. Ctrl+R or F5 does the same; **Stop refresh** stops after the current project. After an operation only that project is rechecked, without fetching.
 - Failures and cancellations appear in the operation panel; expected tool errors are shown without a Python traceback.
 - Remove asks first and never changes the folder or its saved settings.
 - Settings can browse for the APK and JDK, choose among several connected devices, and checks that JAVA_HOME contains bin/java before saving. Branch identity is local and
