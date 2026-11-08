@@ -239,10 +239,11 @@ def convert(args):
         prefs_path = config / 'plugins' / 'dedrm.json'
         prefs = json.loads(prefs_path.read_text(encoding='utf-8')) if prefs_path.exists() else {}
         serials = prefs.get('serials', [])
-        failures = 0
-        for book in selected:
+        failed = []
+        converted = skipped = 0
+        for position, book in enumerate(selected, 1):
             key = str(book.relative_to(source))
-            print('Processing: ' + book.name, flush=True)
+            print('[{}/{}] {}'.format(position, len(selected), book.name), flush=True)
             try:
                 fp = fingerprint(book)
                 previous = report['books'].get(key, {})
@@ -256,6 +257,7 @@ def convert(args):
                         pass  # A stricter validator may invalidate an older result.
                     else:
                         print('  Already verified; skipped.', flush=True)
+                        skipped += 1
                         continue
                 job = Path(tempfile.mkdtemp(prefix='', dir=state))
                 snapshot = job / 'originals'
@@ -297,14 +299,31 @@ def convert(args):
                     epub=str(output.relative_to(state)), sha256=content_hash,
                     log=str(log.relative_to(state)))
                 print('  Ready: ' + output.name, flush=True)
+                converted += 1
             except (OSError, ValueError, RuntimeError, KeyError, zipfile.BadZipFile, ET.ParseError) as exc:
-                failures += 1
+                failed.append((book.name, str(exc)))
                 report['books'][key] = {'status': 'failed', 'error': str(exc)}
                 print('  FAILED: ' + str(exc), flush=True)
             atomic_json(report_path, report)
-        return 1 if failures else 0
+        for line in summary_lines(converted, skipped, failed, state / 'epubs'):
+            print(line, flush=True)
+        return 1 if failed else 0
     finally:
         lock.unlink(missing_ok=True)
+
+
+def summary_lines(converted, skipped, failed, epub_dir):
+    """End-of-run summary: counts first, then each failure with its reason."""
+    total = converted + skipped + len(failed)
+    lines = ['', 'Summary: {} book{}: {} converted, {} already verified, {} failed.'.format(
+        total, '' if total == 1 else 's', converted, skipped, len(failed))]
+    if failed:
+        lines.append('Failed (originals untouched; see each job folder\'s conversion.log):')
+        lines.extend('  {}: {}'.format(name, error) for name, error in failed)
+    if converted or skipped:
+        lines.append('EPUBs: ' + str(epub_dir))
+        lines.append('Next: run publish to copy verified EPUBs to your sync folder.')
+    return lines
 
 
 def publish(args):
@@ -323,10 +342,14 @@ def publish(args):
         if not epub.is_relative_to(state) or digest(epub) != entry['sha256']:
             raise ValueError('Output has changed; refusing publication')
         validate_epub(epub)
+    copied = 0
     for entry in ready:
         epub = state / entry['epub']
         added = copy_new(epub, dest / epub.name, expected_sha256=entry['sha256'])
+        copied += bool(added)
         print(('Copied: ' if added else 'Already present: ') + epub.name)
+    print('')
+    print('Summary: {} copied, {} already present in {}.'.format(copied, len(ready) - copied, dest))
     print('Local copy verified. Cloud sync and reader display require separate verification.')
     return 0
 

@@ -251,6 +251,15 @@ class TransferTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'Duplicate AZW6 placeholder'):
                     restore(self.root / 'unused.azw6', source, self.root / 'restored.epub')
 
+    def test_summary_lists_counts_and_failures(self):
+        lines = kt.summary_lines(2, 1, [('Book.azw3', 'DRM')], Path('state/epubs'))
+        self.assertIn('Summary: 4 books: 2 converted, 1 already verified, 1 failed.', lines)
+        self.assertIn('  Book.azw3: DRM', lines)
+        self.assertTrue(any(line.startswith('Next: run publish') for line in lines))
+        only_failed = kt.summary_lines(0, 0, [('A.kfx', 'x')], Path('e'))
+        self.assertIn('Summary: 1 book: 0 converted, 0 already verified, 1 failed.', only_failed)
+        self.assertFalse(any(line.startswith('Next:') for line in only_failed))
+
     def test_paths(self):
         for path in ('../../escape', '/absolute', '//absolute', '%2f%2fabsolute', 'C:/escape', '%2e%2e/%2e%2e/escape'):
             with self.subTest(path=path), self.assertRaises(ValueError):
