@@ -7,18 +7,18 @@ import traceback
 from pathlib import Path
 
 from PySide6.QtCore import (
-    QObject, QRect, QRunnable, QSize, Qt, QThreadPool, QTimer, QUrl, Signal, Slot,
+    QItemSelectionModel, QObject, QRect, QRunnable, QSize, Qt, QThreadPool, QTimer, QUrl, Signal, Slot,
 )
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontMetrics, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QDialog, QDialogButtonBox, QFileDialog,
+    QAbstractItemView, QApplication, QCheckBox, QScrollArea, QDialog, QDialogButtonBox, QFileDialog,
     QFormLayout, QFrame, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit,
     QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSizePolicy,
     QStackedWidget, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
-from . import backends, core, presentation, theme
+from . import backends, core, presentation, projects, theme
 
 ICON_PATH = Path(__file__).resolve().parent / "assets" / "droidrun-icon.png"
 ROLE_PATH = 1001
@@ -225,11 +225,128 @@ class Worker(QRunnable):
             self.signals.failed.emit((exc, traceback.format_exc()))
 
 
+class ProjectPickerDialog(QDialog):
+    """Choose which of the projects found beneath a folder to add."""
+
+    def __init__(self, discovery: projects.Discovery, existing: set[str], parent=None):
+        super().__init__(parent)
+        root = Path(discovery.root)
+        self.setWindowTitle("Add projects — DroidRun")
+        self.setMinimumWidth(620)
+        self.resize(680, 520)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(8)
+        title = QLabel(f"Add projects from {root.name or root}")
+        title.setObjectName("projectName")
+        path = ElidedLabel(display_path(str(root)))
+        path.setObjectName("path")
+        layout.addWidget(title)
+        layout.addWidget(path)
+
+        candidates = discovery.candidates
+        new = [c for c in candidates if c.path not in existing]
+        if candidates and candidates[0].outside:
+            intro = ("There are no projects beneath this folder, but it is inside this project. "
+                     "Add it instead?")
+        elif not new:
+            intro = f"All {len(candidates)} projects found here are already in DroidRun."
+        else:
+            count = len(candidates)
+            intro = (f"Found {count} project{'s' if count != 1 else ''}. Choose the ones to add. "
+                     "Unchecked ones may not build yet; the reason is shown under each.")
+        if discovery.truncated:
+            intro += (" The search stopped early because this folder is very large; choose a folder "
+                      "closer to the projects to see everything.")
+        self.intro = QLabel(intro)
+        self.intro.setWordWrap(True)
+        self.intro.setObjectName("muted")
+        layout.addSpacing(4)
+        layout.addWidget(self.intro)
+
+        rows = QWidget()
+        rows_layout = QVBoxLayout(rows)
+        rows_layout.setContentsMargins(4, 4, 4, 4)
+        rows_layout.setSpacing(10)
+        self.boxes: list[tuple[QCheckBox, projects.Candidate]] = []
+        for candidate in candidates:
+            added = candidate.path in existing
+            box = QCheckBox(Path(candidate.path).name)
+            box.setStyleSheet("font-weight: 600;")
+            box.setChecked(candidate.recommended and not added)
+            box.setEnabled(not added)
+            location = "this folder" if candidate.relative == "." else display_path(candidate.relative)
+            detail_text = f"{candidate.kind}  ·  {location}"
+            if added:
+                detail_text += "  ·  already in DroidRun"
+            elif candidate.note:
+                detail_text += f"\n{candidate.note}"
+            box.setToolTip(candidate.path)
+            box.setAccessibleDescription(detail_text.replace("\n", ". "))
+            detail = QLabel(detail_text)
+            detail.setObjectName("muted")
+            detail.setWordWrap(True)
+            detail.setContentsMargins(26, 0, 0, 0)
+            if candidate.note and not added:
+                detail.setStyleSheet(f"color: {theme.TONES['warn']};")
+            item = QVBoxLayout()
+            item.setSpacing(1)
+            item.addWidget(box)
+            item.addWidget(detail)
+            rows_layout.addLayout(item)
+            box.toggled.connect(self._update_count)
+            self.boxes.append((box, candidate))
+        rows_layout.addStretch(1)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(rows)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setAccessibleName("Projects found")
+        layout.addWidget(scroll, 1)
+
+        buttons = QHBoxLayout()
+        self.all_button = QPushButton("Select all")
+        self.all_button.setObjectName("quiet")
+        self.all_button.clicked.connect(lambda: self._set_all(True))
+        self.none_button = QPushButton("Clear")
+        self.none_button.setObjectName("quiet")
+        self.none_button.clicked.connect(lambda: self._set_all(False))
+        self.add_button = QPushButton("Add")
+        self.add_button.setObjectName("primary")
+        self.add_button.setDefault(True)
+        self.add_button.clicked.connect(self.accept)
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        for button in (self.all_button, self.none_button):
+            buttons.addWidget(button)
+        buttons.addStretch(1)
+        buttons.addWidget(cancel)
+        buttons.addWidget(self.add_button)
+        layout.addLayout(buttons)
+        multiple = sum(1 for box, _ in self.boxes if box.isEnabled()) > 1
+        self.all_button.setVisible(multiple)
+        self.none_button.setVisible(multiple)
+        self._update_count()
+
+    def _set_all(self, checked: bool) -> None:
+        for box, _ in self.boxes:
+            if box.isEnabled():
+                box.setChecked(checked)
+
+    def _update_count(self, *_):
+        count = len(self.chosen())
+        self.add_button.setText("Add project" if count == 1 else f"Add {count} projects")
+        self.add_button.setEnabled(count > 0)
+
+    def chosen(self) -> list[str]:
+        return [candidate.path for box, candidate in self.boxes if box.isEnabled() and box.isChecked()]
+
+
 class SettingsDialog(QDialog):
     def __init__(self, project: str, parent=None):
         super().__init__(parent)
         self.project = project
-        self.setWindowTitle(f"{Path(project).name} settings — DroidRun")
+        self.setWindowTitle(f"{projects.display_name(project)} settings — DroidRun")
         self.setMinimumWidth(640)
         pref = core.load_preferences(project)
 
@@ -258,7 +375,7 @@ class SettingsDialog(QDialog):
             box.addWidget(button)
             return row
 
-        title = QLabel(Path(project).name)
+        title = QLabel(projects.display_name(project))
         title.setObjectName("projectName")
         path = ElidedLabel(project)
         path.setObjectName("path")
@@ -437,6 +554,8 @@ class MainWindow(QMainWindow):
 
         self.table = make_status_table(COLUMNS)
         self.table.setAccessibleName("Projects")
+        # Several projects can be selected to refresh just those (Ctrl/Shift+click, Ctrl+A).
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Stretch)
         header.setSectionResizeMode(4, QHeaderView.Fixed)
@@ -448,6 +567,8 @@ class MainWindow(QMainWindow):
         self.table.itemSelectionChanged.connect(self.update_details)
         QShortcut(QKeySequence(Qt.Key_Return), self.table, self.sync_run, context=Qt.WidgetShortcut)
         QShortcut(QKeySequence(Qt.Key_Enter), self.table, self.sync_run, context=Qt.WidgetShortcut)
+        QShortcut(QKeySequence(Qt.Key_Escape), self.table, self.table.clearSelection, context=Qt.WidgetShortcut)
+        QShortcut(QKeySequence(Qt.Key_F2), self.table, self.rename_project, context=Qt.WidgetShortcut)
 
         self.empty = self._build_empty_state()
         self.project_stack = QStackedWidget()
@@ -511,8 +632,10 @@ class MainWindow(QMainWindow):
         self.scan_button.clicked.connect(self.scan_device)
         self.reports_button = QPushButton("Reports…")
         self.reports_button.clicked.connect(self.reports)
-        self.refresh_button = QPushButton("Refresh status")
-        self.refresh_button.setToolTip("Fetch Git remotes and recheck builds and the device (Ctrl+R)")
+        self.refresh_button = QPushButton("Refresh All")
+        self.refresh_button.setToolTip("Fetch Git remotes and recheck builds and the device for the selected "
+                                       "projects, or every project when none is selected (Ctrl+R). "
+                                       "Esc clears the selection.")
         self.refresh_button.clicked.connect(self.refresh_or_stop)
         for button in (self.scan_button, self.reports_button, self.refresh_button):
             row.addWidget(button)
@@ -592,11 +715,14 @@ class MainWindow(QMainWindow):
         self.pull_button.clicked.connect(self.git_pull)
         self.settings_button = QPushButton("Settings…")
         self.settings_button.clicked.connect(self.settings)
+        self.rename_button = QPushButton("Rename…")
+        self.rename_button.setToolTip("Change the name shown in DroidRun (F2)")
+        self.rename_button.clicked.connect(self.rename_project)
         self.remove_button = QPushButton("Remove…")
         self.remove_button.setToolTip("Forget this project; files and settings are kept")
         self.remove_button.clicked.connect(self.remove_project)
         secondary_row.addStretch(1)
-        for button in (self.pull_button, self.settings_button, self.remove_button):
+        for button in (self.pull_button, self.rename_button, self.settings_button, self.remove_button):
             button.setObjectName("quiet")
             secondary_row.addWidget(button)
         actions.addLayout(primary_row)
@@ -647,23 +773,35 @@ class MainWindow(QMainWindow):
         return card
 
     # ----- projects -------------------------------------------------------------------
+    def selected_projects(self) -> list[str]:
+        """Selected project paths, in list order."""
+        rows = sorted(index.row() for index in self.table.selectionModel().selectedRows())
+        return [self.table.item(row, 0).data(ROLE_PATH) for row in rows if self.table.item(row, 0)]
+
     def selected_project(self) -> str | None:
-        row = self.table.currentRow()
-        if row < 0 or not self.table.selectionModel().hasSelection():
-            return None
-        item = self.table.item(row, 0)
-        return item.data(ROLE_PATH) if item else None
+        """The selected project when exactly one is selected; actions need exactly one."""
+        selected = self.selected_projects()
+        return selected[0] if len(selected) == 1 else None
 
     def select_project(self, project: str | None):
-        if not project:
+        self.select_projects([project] if project else [])
+
+    def select_projects(self, chosen: list[str]):
+        wanted = {str(Path(p).expanduser().resolve()) for p in chosen}
+        if not wanted:
             return
-        normalized = str(Path(project).expanduser().resolve())
+        self.table.clearSelection()
+        first = None
         for row in range(self.table.rowCount()):
             item = self.table.item(row, 0)
-            if item and item.data(ROLE_PATH) == normalized:
-                self.table.selectRow(row)
-                self.table.scrollToItem(item)
-                return
+            if item and item.data(ROLE_PATH) in wanted:
+                self.table.selectionModel().select(
+                    self.table.model().index(row, 0),
+                    QItemSelectionModel.Select | QItemSelectionModel.Rows)
+                first = first or item
+        if first is not None:
+            self.table.setCurrentItem(first, QItemSelectionModel.NoUpdate)
+            self.table.scrollToItem(first)
 
     def _set_cell(self, row: int, column: int, text: str, tone_name: str = presentation.NEUTRAL,
                   tooltip: str = "", branch: str = "") -> None:
@@ -692,37 +830,46 @@ class MainWindow(QMainWindow):
         self._set_cell(row, 4, checked)
 
     def reload_rows(self):
-        selected = self.selected_project()
-        projects = core.load_projects()
-        self.table.setRowCount(len(projects))
-        for row, project in enumerate(projects):
-            item = QTableWidgetItem(Path(project).name)
+        selected = self.selected_projects()
+        saved = core.load_projects()
+        names = projects.load_names()
+        self.table.setRowCount(len(saved))
+        for row, project in enumerate(saved):
+            item = QTableWidgetItem(projects.display_name(project, names))
             item.setToolTip(project)
             item.setData(ROLE_PATH, project)
             item.setData(ROLE_SUBTITLE, display_path(project))
             self.table.setItem(row, 0, item)
             self._apply_status(row, project)
-        self.projects_title.setText(f"Projects ({len(projects)})" if projects else "Projects")
-        self.project_stack.setCurrentWidget(self.table if projects else self.empty)
-        if projects:
-            self.select_project(selected or projects[0])
-            if not self.selected_project():
-                self.table.selectRow(0)
+        self.projects_title.setText(f"Projects ({len(saved)})" if saved else "Projects")
+        self.project_stack.setCurrentWidget(self.table if saved else self.empty)
+        # Nothing is selected by default, so Refresh All means every project.
+        self.select_projects(selected)
         self.update_details()
 
     def update_details(self):
-        project = self.selected_project()
+        selected = self.selected_projects()
+        project = selected[0] if len(selected) == 1 else None
         if not project:
-            self.detail_name.setText("No project selected")
-            self.detail_path.setText("")
-            self.detail_plan.setText("Add or select a project to build, install, and run it.")
+            names = projects.load_names()
+            if selected:
+                self.detail_name.setText(f"{len(selected)} projects selected")
+                self.detail_path.setText(", ".join(projects.display_name(p, names) for p in selected))
+                self.detail_plan.setText("Refresh checks only these projects. Select one project to build, "
+                                         "install, rename, or change its settings.")
+            else:
+                self.detail_name.setText("No project selected")
+                self.detail_path.setText("")
+                self.detail_plan.setText("Select a project to build, install, and run it. With none selected, "
+                                         "Refresh checks every project." if self.table.rowCount()
+                                         else "Add a project to build, install, and run it.")
             self.detail_plan.setStyleSheet(f"color: {theme.MUTED};")
             self.detail_fix.hide()
             self.detail_settings.setText("")
             self.update_controls()
             return
         pref = core.load_preferences(project)
-        self.detail_name.setText(Path(project).name)
+        self.detail_name.setText(projects.display_name(project))
         self.detail_path.setText(display_path(project))
         status = self.statuses.get(project)
         if status is None:
@@ -747,14 +894,15 @@ class MainWindow(QMainWindow):
     def update_controls(self):
         has_project = self.selected_project() is not None
         idle = not self.busy and not self.refreshing
-        for button in (self.sync_button, self.build_button, self.pull_button,
+        for button in (self.sync_button, self.build_button, self.pull_button, self.rename_button,
                        self.settings_button, self.remove_button):
             button.setEnabled(has_project and idle)
         self.add_button.setEnabled(idle)
         self.empty_add_button.setEnabled(idle)
         self.scan_button.setEnabled(idle and self.table.rowCount() > 0)
         self.refresh_button.setEnabled(not self.busy and self.table.rowCount() > 0)
-        self.refresh_button.setText("Stop refresh" if self.refreshing else "Refresh status")
+        self.refresh_button.setText("Stop refresh" if self.refreshing else
+                                    projects.refresh_label(len(self.selected_projects())))
         self.table.setEnabled(not self.busy)
         self.copy_button.setEnabled(bool(self.output.toPlainText()))
 
@@ -867,44 +1015,49 @@ class MainWindow(QMainWindow):
             self.refresh_state.setText("Stopping after the current project…")
             self.refresh_button.setEnabled(False)
         else:
-            self.refresh()
+            # The selected projects, or every project when none is selected.
+            self.refresh(targets=projects.refresh_targets(core.load_projects(), self.selected_projects()))
 
-    def refresh(self, fetch: bool = True, only: str | None = None):
-        projects = core.load_projects()
+    def refresh(self, fetch: bool = True, only: str | None = None, targets: list[str] | None = None):
+        saved = core.load_projects()
         if only:
-            projects = [p for p in projects if p == only]
-        if not projects or self.busy or self.refreshing:
+            targets = [only]
+        projects_to_check = [p for p in saved if targets is None or p in targets]
+        self._refresh(projects_to_check, fetch, len(projects_to_check) == len(saved))
+
+    def _refresh(self, to_check: list[str], fetch: bool, everything: bool):
+        if not to_check or self.busy or self.refreshing:
             return
         self.refreshing = True
         self.stop_refresh = False
-        for project in projects:
+        for project in to_check:
             self.checked[project] = PENDING
         for row in range(self.table.rowCount()):
             project = self.table.item(row, 0).data(ROLE_PATH)
-            if project in projects:
+            if project in to_check:
                 self._set_cell(row, 4, PENDING)
-        self.refresh_progress.setRange(0, len(projects))
+        self.refresh_progress.setRange(0, len(to_check))
         self.refresh_progress.setValue(0)
         self.refresh_progress.show()
         self.update_controls()
 
         def task(_emit, progress):
-            for index, project in enumerate(projects, 1):
+            for index, project in enumerate(to_check, 1):
                 if self.stop_refresh:
                     break
-                progress(("start", project, index, len(projects)))
+                progress(("start", project, index, len(to_check)))
                 try:
                     result = core.project_status(project, fetch=fetch)
                 except Exception as exc:  # keep checking the remaining projects
                     result = core.ProjectStatus("Unknown", "Unknown", "Unknown", str(exc))
-                progress(("done", project, index, len(projects), result))
-            return len(projects)
+                progress(("done", project, index, len(to_check), result))
+            return len(to_check)
 
         def on_progress(event):
             kind, project, index, total = event[:4]
             row = self._row_for(project)
             if kind == "start":
-                self.refresh_state.setText(f"Checking {index}/{total}: {Path(project).name}")
+                self.refresh_state.setText(f"Checking {index}/{total}: {self._name(project)}")
                 self.checked[project] = "Checking…"
             else:
                 self.statuses[project] = event[4]
@@ -927,12 +1080,17 @@ class MainWindow(QMainWindow):
                     if row is not None:
                         self._apply_status(row, project)
             stamp = time.strftime("%H:%M")
+            scope = "" if everything else (f" {self._name(to_check[0])}" if len(to_check) == 1
+                                           else f" {len(to_check)} to_check")
             self.refresh_state.setText(f"Refresh stopped at {stamp}" if stopped else
-                                       f"{'Checked' if fetch else 'Rechecked'} at {stamp}")
+                                       f"{'Checked' if fetch else 'Rechecked'}{scope} at {stamp}")
             self.update_controls()
             self.update_details()
 
         self._launch(task, finish, lambda error: finish(None), on_progress)
+
+    def _name(self, project: str) -> str:
+        return projects.display_name(project)
 
     def _row_for(self, project: str) -> int | None:
         for row in range(self.table.rowCount()):
@@ -1009,13 +1167,59 @@ class MainWindow(QMainWindow):
             self.refresh(fetch=False, only=project)
 
     def add_project(self):
-        path = QFileDialog.getExistingDirectory(self, "Choose an Android project or repository")
+        path = QFileDialog.getExistingDirectory(self, "Choose a repository or project folder")
         if not path:
             return
-        core.remember_project(path)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            found = projects.discover(path)
+        finally:
+            QApplication.restoreOverrideCursor()
+        chosen = self.choose_projects(found)
+        if not chosen:
+            return
+        for project in reversed(chosen):
+            core.remember_project(project)
         self.reload_rows()
-        self.select_project(path)
-        self.refresh(only=str(Path(path).expanduser().resolve()))
+        self.select_projects(chosen)
+        self.refresh(targets=chosen)
+
+    def choose_projects(self, found: projects.Discovery) -> list[str]:
+        """Ask which discovered projects to add; returns the paths to add."""
+        existing = set(core.load_projects())
+        candidates = found.candidates
+        if not candidates:
+            answer = QMessageBox.question(
+                self, "No projects found",
+                f"No Android projects were found in {display_path(found.root)}.\n\nDroidRun looks up to "
+                f"{projects.DISCOVERY_DEPTH} folders deep for gradlew, project.godot, or "
+                f"{backends.CONFIG}. Add this folder anyway? You can set up a custom build for it "
+                "later in Settings.",
+                QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
+            return [found.root] if answer == QMessageBox.Yes else []
+        only = candidates[0]
+        if (len(candidates) == 1 and only.relative == "." and only.path not in existing
+                and only.recommended):
+            return [only.path]  # The chosen folder is the project; nothing to choose.
+        dialog = ProjectPickerDialog(found, existing, self)
+        return dialog.chosen() if dialog.exec() else []
+
+    def rename_project(self):
+        project = self.selected_project()
+        if not project or self.busy or self.refreshing:
+            return
+        folder = Path(project).name
+        current = projects.display_name(project)
+        name, ok = QInputDialog.getText(
+            self, "Rename project",
+            f"Name shown in DroidRun for {display_path(project)}.\n"
+            f"Leave it empty to use the folder name ({folder}). The folder itself is not renamed.",
+            QLineEdit.Normal, current)
+        if not ok:
+            return
+        projects.set_name(project, name)
+        self.reload_rows()
+        self.select_project(project)
 
     def remove_project(self):
         project = self.require_project()
@@ -1023,7 +1227,7 @@ class MainWindow(QMainWindow):
             return
         answer = QMessageBox.question(
             self, "Remove project",
-            f"Remove {Path(project).name} from DroidRun?\n\nThe folder, its files, and its saved "
+            f"Remove {projects.display_name(project)} from DroidRun?\n\nThe folder, its files, and its saved "
             "settings are not changed. You can add it again later.",
             QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
         if answer != QMessageBox.Yes:
@@ -1070,7 +1274,7 @@ class ScanDialog(QDialog):
         table.setColumnWidth(2, 190)
         table.setRowCount(len(results))
         for row, (project, status) in enumerate(results):
-            name = QTableWidgetItem(Path(project).name)
+            name = QTableWidgetItem(projects.display_name(project))
             name.setData(ROLE_SUBTITLE, project)
             table.setItem(row, 0, name)
             for column, value in ((1, status.device), (2, status.build)):

@@ -9,7 +9,7 @@ from unittest import mock
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 try:
-    from PySide6.QtWidgets import QApplication, QMessageBox
+    from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog, QMessageBox
 except ImportError:  # pragma: no cover - PySide6 is a runtime dependency
     QApplication = None
 
@@ -17,7 +17,8 @@ from android_build_install_linux import core
 
 
 @unittest.skipIf(QApplication is None, "PySide6 is not installed")
-class DashboardTests(unittest.TestCase):
+class DashboardTestCase(unittest.TestCase):
+    """Shared setup: two saved projects and a mocked status check."""
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
@@ -66,6 +67,8 @@ class DashboardTests(unittest.TestCase):
         self.window.select_project(project)
         self.app.processEvents()
 
+
+class DashboardTests(DashboardTestCase):
     def test_button_labels_keep_their_ampersand(self):
         # A bare "&" in a Qt label is a mnemonic and was rendered as "Sync _Run".
         self.assertEqual(self.window.sync_button.text().replace("&&", "&"), "Sync & Run")
@@ -155,6 +158,110 @@ class DashboardTests(unittest.TestCase):
         self.window.reload_rows()
         self.assertIs(self.window.project_stack.currentWidget(), self.window.empty)
         self.assertFalse(self.window.sync_button.isEnabled())
+
+
+class ProjectManagementTests(DashboardTestCase):
+    """Adding projects from a repository, renaming, and refresh scope."""
+
+    def make_project(self, folder: Path) -> Path:
+        (folder / "app" / "src" / "main").mkdir(parents=True)
+        (folder / "app" / "src" / "main" / "AndroidManifest.xml").write_text("<manifest/>")
+        (folder / "gradlew").write_text("")
+        return folder
+
+    def calls_during_refresh(self, action):
+        calls = []
+        core.project_status.side_effect = lambda project, fetch=False: (
+            calls.append(project) or self.statuses.get(project) or core.ProjectStatus("Current", "Fresh", "Same", ""))
+        action()
+        self.wait(lambda: not self.window.refreshing)
+        return calls
+
+    def test_nothing_is_selected_at_start_so_refresh_checks_all(self):
+        self.assertEqual(self.window.selected_projects(), [])
+        self.assertEqual(self.window.refresh_button.text(), "Refresh All")
+        self.assertEqual(sorted(self.calls_during_refresh(self.window.refresh_or_stop)), sorted(self.projects))
+
+    def test_refresh_checks_only_the_selected_projects(self):
+        self.select(self.projects[1])
+        self.assertEqual(self.window.refresh_button.text(), "Refresh Selected")
+        self.assertEqual(self.calls_during_refresh(self.window.refresh_or_stop), [self.projects[1]])
+        self.window.select_projects(self.projects)
+        self.app.processEvents()
+        self.assertEqual(self.window.refresh_button.text(), "Refresh 2 Selected")
+        self.assertIn("2 projects selected", self.window.detail_name.text())
+        self.assertFalse(self.window.sync_button.isEnabled())
+        self.window.table.clearSelection()
+        self.app.processEvents()
+        self.assertEqual(self.window.refresh_button.text(), "Refresh All")
+
+    def test_rename_and_reset_to_folder_name(self):
+        self.select(self.projects[0])
+        with mock.patch.object(QInputDialog, "getText", return_value=("Chess (phone)", True)):
+            self.window.rename_project()
+        row = self.window._row_for(self.projects[0])
+        self.assertEqual(self.window.table.item(row, 0).text(), "Chess (phone)")
+        self.assertEqual(self.window.detail_name.text(), "Chess (phone)")
+        self.assertEqual(self.window.selected_project(), self.projects[0])
+        with mock.patch.object(QInputDialog, "getText", return_value=("", True)):
+            self.window.rename_project()
+        self.assertEqual(self.window.table.item(row, 0).text(), "alpha app")
+        with mock.patch.object(QInputDialog, "getText", return_value=("Ignored", False)):
+            self.window.rename_project()
+        self.assertEqual(self.window.table.item(row, 0).text(), "alpha app")
+
+    def test_add_offers_every_project_beneath_the_repository(self):
+        repo = Path(self.temp.name) / "big repo"
+        phone = self.make_project(repo / "phone app")
+        watch = self.make_project(repo / "wear" / "watch app")
+        (repo / "server").mkdir()
+        (repo / "server" / "gradlew").write_text("")  # not Android: listed, not pre-checked
+        seen = {}
+
+        def accept(dialog):
+            seen["names"] = [box.text() for box, _ in dialog.boxes]
+            seen["checked"] = [box.text() for box, _ in dialog.boxes if box.isChecked()]
+            seen["button"] = dialog.add_button.text()
+            return 1
+
+        from android_build_install_linux import app as app_module
+        with mock.patch.object(QFileDialog, "getExistingDirectory", return_value=str(repo)), \
+                mock.patch.object(app_module.ProjectPickerDialog, "exec", accept):
+            added = self.calls_during_refresh(self.window.add_project)
+        self.assertEqual(seen["names"], ["phone app", "server", "watch app"])
+        self.assertEqual(seen["checked"], ["phone app", "watch app"])
+        self.assertEqual(seen["button"], "Add 2 projects")
+        expected = [str(phone.resolve()), str(watch.resolve())]
+        self.assertEqual(sorted(added), sorted(expected))
+        self.assertEqual(sorted(self.window.selected_projects()), sorted(expected))
+        self.assertNotIn(str((repo / "server").resolve()), core.load_projects())
+
+    def test_a_project_folder_is_added_without_asking(self):
+        project = self.make_project(Path(self.temp.name) / "solo")
+        from android_build_install_linux import app as app_module
+        with mock.patch.object(QFileDialog, "getExistingDirectory", return_value=str(project)), \
+                mock.patch.object(app_module.ProjectPickerDialog, "exec", side_effect=AssertionError("asked")):
+            self.calls_during_refresh(self.window.add_project)
+        self.assertIn(str(project.resolve()), core.load_projects())
+
+    def test_projects_already_added_cannot_be_added_again(self):
+        repo = Path(self.temp.name) / "src with spaces"
+        self.make_project(repo / "alpha app")
+        from android_build_install_linux import app as app_module, projects
+        dialog = app_module.ProjectPickerDialog(projects.discover(str(repo)), set(core.load_projects()), self.window)
+        box = dict((b.text(), b) for b, _ in dialog.boxes)["alpha app"]
+        self.assertFalse(box.isEnabled())
+        self.assertEqual(dialog.chosen(), [])
+        self.assertFalse(dialog.add_button.isEnabled())
+        dialog.close()
+
+    def test_nothing_found_asks_before_adding_the_folder(self):
+        empty = Path(self.temp.name) / "notes"
+        empty.mkdir()
+        with mock.patch.object(QFileDialog, "getExistingDirectory", return_value=str(empty)), \
+                mock.patch.object(QMessageBox, "question", return_value=QMessageBox.Cancel):
+            self.window.add_project()
+        self.assertNotIn(str(empty.resolve()), core.load_projects())
 
 
 if __name__ == "__main__":
