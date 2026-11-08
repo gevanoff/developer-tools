@@ -194,7 +194,14 @@ def command(plan: BuildPlan, gradle_task: str) -> list[str]:
 _MISSING_FILE = re.compile(r"(?:FileNotFoundException|NoSuchFileException):\s*(.+?)\s*$")
 _MISSING_SUFFIX = re.compile(
     r"\s*\((?:The system cannot find the (?:path|file) specified|No such file or directory)\)?\.?$")
-_CACHE_SEGMENT = re.compile(r"[\\/]caches[\\/]")
+# Only Gradle's own cache layout under GRADLE_USER_HOME counts: caches/modules-2/files-2.1
+# (downloads), caches/transforms-N, caches/jars-N, and version folders such as
+# caches/8.9/transforms. A project folder that happens to be called "caches" must never
+# match, because the repair message tells the user to delete what it names.
+_GRADLE_CACHE = re.compile(
+    r"[\\/]caches[\\/](?:modules-\d+[\\/]files-\d+\.\d+|transforms-\d+|jars-\d+|"
+    r"\d+\.\d+(?:\.\d+)?(?:-[^\\/]+)?[\\/](?:transforms|kotlin-dsl|groovy-dsl|"
+    r"generated-gradle-jars|scripts|scripts-remapped))[\\/]")
 
 
 def missing_gradle_cache_files(output: str) -> list[str]:
@@ -205,7 +212,7 @@ def missing_gradle_cache_files(output: str) -> list[str]:
         if not match:
             continue
         path = _MISSING_SUFFIX.sub("", match.group(1)).strip()
-        if _CACHE_SEGMENT.search(path) and path not in found:
+        if _GRADLE_CACHE.search(path) and path not in found:
             found.append(path)
     return found
 
@@ -221,17 +228,27 @@ def gradle_recovery_arguments(output: str) -> list[str]:
 
 
 def gradle_cache_entries(paths: list[str]) -> list[str]:
-    """Folders to clear by hand: the group/artifact/version folder for downloaded
-    modules, otherwise the folder that held the missing file."""
+    """Folders to clear by hand, all inside Gradle's caches folder: the
+    group/artifact/version folder for a downloaded module, or the single transform or
+    JAR cache entry (the folder directly under transforms-N, jars-N or
+    <version>/transforms) that held the missing file."""
     entries: list[str] = []
     for path in paths:
+        if not _GRADLE_CACHE.search(path):
+            continue
         parts = re.split(r"[\\/]", path)
         separator = "\\" if "\\" in path else "/"
-        try:
-            index = parts.index("files-2.1")
-            entry = separator.join(parts[:index + 4])
-        except ValueError:
-            entry = separator.join(parts[:-1])
+        caches = max(i for i, part in enumerate(parts) if part == "caches")
+        kind = parts[caches + 1]
+        if kind.startswith("modules-") and "files-2.1" in parts[caches:]:
+            end = parts.index("files-2.1", caches) + 4       # group/artifact/version
+        elif kind.startswith(("transforms-", "jars-")):
+            end = caches + 3                                 # caches/transforms-N/<entry>
+        else:
+            end = caches + 4                                 # caches/<version>/<cache>/<entry>
+        if end >= len(parts):                                # never name the file itself
+            end = len(parts) - 1
+        entry = separator.join(parts[:end])
         if entry and entry not in entries:
             entries.append(entry)
     return entries

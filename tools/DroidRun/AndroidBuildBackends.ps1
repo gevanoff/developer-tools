@@ -185,6 +185,12 @@ function Assert-AndroidBackendApkPreference {
 # for those paths. DroidRun retries such a build once with fresh dependency resolution.
 # It never deletes anything in the Gradle cache. Keep in step with backends.py.
 
+# Only Gradle's own cache layout under GRADLE_USER_HOME counts: caches\modules-2\files-2.1
+# (downloads), caches\transforms-N, caches\jars-N, and version folders such as
+# caches\8.9\transforms. A project folder that happens to be called "caches" must never
+# match, because the repair message tells the user to delete what it names.
+$script:GradleCachePattern = '[\\/]caches[\\/](?:modules-\d+[\\/]files-\d+\.\d+|transforms-\d+|jars-\d+|\d+\.\d+(?:\.\d+)?(?:-[^\\/]+)?[\\/](?:transforms|kotlin-dsl|groovy-dsl|generated-gradle-jars|scripts|scripts-remapped))[\\/]'
+
 function Get-GradleMissingCacheFiles {
     # Paths under a Gradle caches folder that the build reported as missing, in order.
     param([string[]]$Lines)
@@ -192,7 +198,7 @@ function Get-GradleMissingCacheFiles {
     foreach ($line in $Lines) {
         if ("$line" -notmatch '(?:FileNotFoundException|NoSuchFileException):\s*(.+?)\s*$') { continue }
         $path = ($matches[1] -replace '\s*\((?:The system cannot find the (?:path|file) specified|No such file or directory)\)?\.?$', '').Trim()
-        if ($path -match '[\\/]caches[\\/]' -and -not $found.Contains($path)) { $found.Add($path) }
+        if ($path -match $script:GradleCachePattern -and -not $found.Contains($path)) { $found.Add($path) }
     }
     return $found.ToArray()
 }
@@ -208,17 +214,25 @@ function Get-GradleRecoveryArguments {
 }
 
 function Get-GradleCacheEntries {
-    # Folders to clear by hand: group\artifact\version for downloaded modules,
-    # otherwise the folder that held the missing file.
+    # Folders to clear by hand, all inside Gradle's caches folder: group\artifact\version
+    # for a downloaded module, or the single transform or JAR cache entry (the folder
+    # directly under transforms-N, jars-N or <version>\transforms) that held the file.
     param([string[]]$Paths)
     $entries = New-Object System.Collections.Generic.List[string]
     foreach ($path in $Paths) {
+        if ($path -notmatch $script:GradleCachePattern) { continue }
         $parts = @($path -split '[\\/]')
         $separator = if ($path.Contains('\')) { '\' } else { '/' }
-        $index = [Array]::IndexOf($parts, 'files-2.1')
-        $entry = if ($index -ge 0 -and $parts.Count -gt $index + 3) { $parts[0..($index + 3)] -join $separator }
-            elseif ($parts.Count -gt 1) { $parts[0..($parts.Count - 2)] -join $separator }
-            else { '' }
+        $caches = -1
+        for ($i = 0; $i -lt $parts.Count; $i++) { if ($parts[$i] -ieq 'caches') { $caches = $i } }
+        $kind = $parts[$caches + 1]
+        $filesIndex = -1
+        for ($i = $caches; $i -lt $parts.Count; $i++) { if ($parts[$i] -ieq 'files-2.1') { $filesIndex = $i; break } }
+        $end = if ($kind -like 'modules-*' -and $filesIndex -ge 0) { $filesIndex + 4 }
+            elseif ($kind -like 'transforms-*' -or $kind -like 'jars-*') { $caches + 3 }
+            else { $caches + 4 }
+        if ($end -ge $parts.Count) { $end = $parts.Count - 1 }
+        $entry = $parts[0..($end - 1)] -join $separator
         if ($entry -and -not $entries.Contains($entry)) { $entries.Add($entry) }
     }
     return $entries.ToArray()

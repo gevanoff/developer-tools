@@ -245,6 +245,28 @@ class GradleCacheRecoveryRuleTests(unittest.TestCase):
                   "java.io.FileNotFoundException: /project/local.properties (No such file or directory)\n")
         self.assertEqual(backends.missing_gradle_cache_files(output), [])
 
+    def test_project_folders_named_caches_are_never_treated_as_gradle_caches(self):
+        # A retry, and above all the "delete these folders" advice, must only ever
+        # concern Gradle's own cache layout, never source assets.
+        for path in ("/work/app/src/main/assets/caches/catalog.json",
+                     "/work/assets/caches/1.2/a.json",
+                     "/work/caches/12/notes.txt",
+                     "C:\\work\\caches\\modules-2\\notes.txt"):
+            output = f"Caused by: java.io.FileNotFoundException: {path} (No such file or directory)\n"
+            self.assertEqual(backends.missing_gradle_cache_files(output), [], path)
+            self.assertEqual(backends.gradle_cache_entries([path]), [], path)
+
+    def test_repair_entries_stay_inside_gradle_caches(self):
+        self.assertEqual(backends.gradle_cache_entries([
+            "/home/a b/.gradle/caches/transforms-4/abc123/transformed/x/jars/classes.jar",
+            "/srv/gradle home/caches/8.9/transforms/def456/metadata.bin",
+            "/srv/g/caches/jars-9/abc/foo.jar",
+        ]), [
+            "/home/a b/.gradle/caches/transforms-4/abc123",
+            "/srv/gradle home/caches/8.9/transforms/def456",
+            "/srv/g/caches/jars-9/abc",
+        ])
+
     def test_recovery_arguments_skip_configuration_cache_only_when_it_was_used(self):
         self.assertEqual(backends.gradle_recovery_arguments(WINDOWS_CACHE_LOG),
                          ["--no-configuration-cache", "--refresh-dependencies"])

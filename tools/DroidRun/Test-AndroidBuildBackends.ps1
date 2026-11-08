@@ -98,6 +98,13 @@ platform="Android"
     Assert-True (@(Get-GradleMissingCacheFiles -Lines @("e: Unresolved reference 'foo'.")).Count -eq 0) 'An ordinary failure must not trigger a cache retry.'
     Assert-True ((@(Get-GradleRecoveryArguments -Lines $cacheLog) -join ' ') -ceq '--no-configuration-cache --refresh-dependencies') 'Recovery arguments changed.'
     Assert-True ((@(Get-GradleRecoveryArguments -Lines @('FileNotFoundException: x')) -join ' ') -ceq '--refresh-dependencies') 'Builds without the configuration cache must not get --no-configuration-cache.'
+    foreach ($projectPath in @('/work/app/src/main/assets/caches/catalog.json', 'C:\work\assets\caches\1.2\a.json', '/work/caches/12/notes.txt', 'C:\work\caches\modules-2\notes.txt')) {
+        $line = "Caused by: java.io.FileNotFoundException: $projectPath (No such file or directory)"
+        Assert-True (@(Get-GradleMissingCacheFiles -Lines @($line)).Count -eq 0) "A project folder named caches was treated as Gradle's cache: $projectPath"
+        Assert-True (@(Get-GradleCacheEntries -Paths @($projectPath)).Count -eq 0) "A project folder named caches was offered for deletion: $projectPath"
+    }
+    $transformEntries = @(Get-GradleCacheEntries -Paths @('/home/a b/.gradle/caches/transforms-4/abc123/transformed/x/jars/classes.jar', 'C:\Gradle Home\caches\8.9\transforms\def456\metadata.bin'))
+    Assert-True (($transformEntries -join '|') -ceq '/home/a b/.gradle/caches/transforms-4/abc123|C:\Gradle Home\caches\8.9\transforms\def456') "Unexpected transform entries: $($transformEntries -join '|')"
     $repair = Get-GradleCacheRepairMessage -Paths @($missingFiles[0])
     Assert-True ($repair.Contains("  C:\Users\Jo Smith\.gradle\caches\modules-2\files-2.1\io.coil-kt\coil\2.7.0") -and -not $repair.Contains('a80e19')) "Repair message must name the module folder: $repair"
 
