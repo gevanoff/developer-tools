@@ -2,6 +2,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Project,
     [Parameter(Mandatory = $true)][string]$PreferencesPath,
+    [string]$DisplayName,
     [Parameter(DontShow = $true)][switch]$UiSmokeTest
 )
 
@@ -274,7 +275,8 @@ $projectPath = Normalize-Path -Path $Project
 $preference = Get-Preference -ProjectPath $projectPath
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "$(Split-Path -Leaf $projectPath) settings - DroidRun"
+$shownName = if ($DisplayName) { $DisplayName } else { Split-Path -Leaf $projectPath }
+$form.Text = "$shownName settings - DroidRun"
 $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
 if ($null -ne $appIcon) { $form.Icon = $appIcon }
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
@@ -285,7 +287,7 @@ $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
 [DroidRun.Theme]::ApplyForm($form)
 $top = 72  # field rows start below the title and path
 
-$title = [DroidRun.Theme]::NewLabel((Split-Path -Leaf $projectPath), 12, [System.Drawing.FontStyle]::Bold, [DroidRun.Theme]::Text)
+$title = [DroidRun.Theme]::NewLabel($shownName, 12, [System.Drawing.FontStyle]::Bold, [DroidRun.Theme]::Text)
 $title.Location = New-Object System.Drawing.Point(16, 12)
 $title.Size = New-Object System.Drawing.Size(704, 28)
 $title.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor

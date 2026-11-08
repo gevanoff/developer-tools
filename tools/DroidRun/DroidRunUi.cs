@@ -596,6 +596,221 @@ namespace DroidRun
         }
     }
 
+    // One project found beneath a folder, as shown in the Add Projects picker.
+    public sealed class PickerItem
+    {
+        public PickerItem(string path, string name, string detail, string note, bool isChecked, bool enabled)
+        {
+            Path = path; Name = name; Detail = detail; Note = note; Checked = isChecked; Enabled = enabled;
+        }
+        public string Path { get; private set; }
+        public string Name { get; private set; }
+        public string Detail { get; private set; }
+        public string Note { get; private set; }
+        public bool Checked { get; private set; }
+        public bool Enabled { get; private set; }
+    }
+
+    internal static class DialogLayout
+    {
+        internal static Form NewDialog(string title, Size client)
+        {
+            Form dialog = new Form();
+            dialog.Text = title;
+            dialog.Font = new Font("Segoe UI", 9f);
+            dialog.StartPosition = FormStartPosition.CenterParent;
+            dialog.FormBorderStyle = FormBorderStyle.Sizable;
+            dialog.MinimizeBox = false;
+            dialog.MaximizeBox = false;
+            dialog.ShowInTaskbar = false;
+            dialog.AutoScaleMode = AutoScaleMode.Dpi;
+            float scale = ThemedButton.DeviceScale(dialog);
+            dialog.ClientSize = new Size((int)(client.Width * scale), (int)(client.Height * scale));
+            Theme.ApplyForm(dialog);
+            return dialog;
+        }
+    }
+
+    // Lets the user choose which projects found beneath a folder to add.
+    public class ProjectPickerDialog
+    {
+        private readonly List<KeyValuePair<CheckBox, PickerItem>> rows = new List<KeyValuePair<CheckBox, PickerItem>>();
+        public Form Dialog;
+        public Label Title;
+        public Label Location;
+        public Label Intro;
+        public Panel Rows;
+        public ThemedButton SelectAll;
+        public ThemedButton Clear;
+        public ThemedButton Add;
+        public ThemedButton Cancel;
+
+        public ProjectPickerDialog(string title, string location, string intro, PickerItem[] items)
+        {
+            Dialog = DialogLayout.NewDialog("Add projects - DroidRun", new Size(660, 500));
+            float scale = ThemedButton.DeviceScale(Dialog);
+            Dialog.MinimumSize = new Size((int)(520 * scale), (int)(380 * scale));
+            Title = Theme.NewLabel(title, 12f, FontStyle.Bold, Theme.Text);
+            Location = Theme.NewLabel(location, 9f, FontStyle.Regular, Theme.Muted);
+            Intro = Theme.NewLabel(intro, 9f, FontStyle.Regular, Theme.Muted);
+            Intro.TextAlign = ContentAlignment.TopLeft;
+
+            Rows = new Panel();
+            Rows.AutoScroll = true;
+            Rows.BackColor = Theme.Surface;
+            Rows.AccessibleName = "Projects found";
+            Theme.DarkScrollBars(Rows);
+            int top = 8;
+            foreach (PickerItem item in items)
+            {
+                CheckBox box = new CheckBox();
+                box.Text = item.Name;
+                box.UseMnemonic = false;
+                box.Checked = item.Checked && item.Enabled;
+                box.Enabled = item.Enabled;
+                box.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+                box.AutoSize = true;
+                box.AccessibleDescription = item.Detail + (string.IsNullOrEmpty(item.Note) ? string.Empty : ". " + item.Note);
+                Theme.StyleCheckBox(box);
+                box.ForeColor = item.Enabled ? Theme.Text : Theme.Disabled;
+                box.Location = new Point((int)(10 * scale), (int)(top * scale));
+                box.Tag = item.Path;
+                box.CheckedChanged += delegate(object sender, EventArgs args) { UpdateCount(); };
+                Rows.Controls.Add(box);
+                Label detail = Theme.NewLabel(item.Detail, 9f, FontStyle.Regular, Theme.Muted);
+                detail.Location = new Point((int)(30 * scale), (int)((top + 24) * scale));
+                detail.Size = new Size((int)(560 * scale), (int)(18 * scale));
+                Rows.Controls.Add(detail);
+                int height = 46;
+                if (!string.IsNullOrEmpty(item.Note))
+                {
+                    Label note = Theme.NewLabel(item.Note, 9f, FontStyle.Regular, Theme.ToneText("warn"));
+                    note.Location = new Point((int)(30 * scale), (int)((top + 42) * scale));
+                    note.Size = new Size((int)(560 * scale), (int)(18 * scale));
+                    Rows.Controls.Add(note);
+                    height = 64;
+                }
+                rows.Add(new KeyValuePair<CheckBox, PickerItem>(box, item));
+                top += height + 6;
+            }
+
+            SelectAll = new ThemedButton("Select &all", ButtonKind.Quiet);
+            Clear = new ThemedButton("C&lear", ButtonKind.Quiet);
+            Add = new ThemedButton("&Add", ButtonKind.Primary);
+            Cancel = new ThemedButton("Cancel", ButtonKind.Secondary);
+            Add.DialogResult = DialogResult.OK;
+            Cancel.DialogResult = DialogResult.Cancel;
+            Dialog.AcceptButton = Add;
+            Dialog.CancelButton = Cancel;
+            SelectAll.Click += delegate(object sender, EventArgs args) { SetAll(true); };
+            Clear.Click += delegate(object sender, EventArgs args) { SetAll(false); };
+            int enabled = 0;
+            foreach (KeyValuePair<CheckBox, PickerItem> row in rows) { if (row.Key.Enabled) { enabled++; } }
+            SelectAll.Visible = enabled > 1;
+            Clear.Visible = enabled > 1;
+
+            BorderHost frame = new BorderHost(Rows);
+            Dialog.Controls.AddRange(new Control[] { Title, Location, Intro, frame, SelectAll, Clear, Cancel, Add });
+            EventHandler layout = delegate(object sender, EventArgs args)
+            {
+                float s = ThemedButton.DeviceScale(Dialog);
+                int width = Dialog.ClientSize.Width;
+                int height = Dialog.ClientSize.Height;
+                int margin = (int)(18 * s);
+                Title.SetBounds(margin, (int)(14 * s), width - 2 * margin, (int)(26 * s));
+                Location.SetBounds(margin, Title.Bottom, width - 2 * margin, (int)(18 * s));
+                Intro.SetBounds(margin, Location.Bottom + (int)(8 * s), width - 2 * margin, (int)(36 * s));
+                int buttonTop = height - margin - (int)(34 * s);
+                frame.SetBounds(margin, Intro.Bottom + (int)(6 * s), width - 2 * margin, Math.Max((int)(60 * s), buttonTop - Intro.Bottom - (int)(18 * s)));
+                SelectAll.SetBounds(margin, buttonTop, (int)(96 * s), (int)(34 * s));
+                Clear.SetBounds(SelectAll.Right + (int)(4 * s), buttonTop, (int)(70 * s), (int)(34 * s));
+                Add.SetBounds(width - margin - (int)(140 * s), buttonTop, (int)(140 * s), (int)(34 * s));
+                Cancel.SetBounds(Add.Left - (int)(8 * s) - (int)(96 * s), buttonTop, (int)(96 * s), (int)(34 * s));
+            };
+            Dialog.Resize += layout;
+            Dialog.Load += layout;
+            layout(Dialog, EventArgs.Empty);
+            UpdateCount();
+        }
+
+        public string[] ChosenPaths
+        {
+            get
+            {
+                List<string> chosen = new List<string>();
+                foreach (KeyValuePair<CheckBox, PickerItem> row in rows)
+                {
+                    if (row.Key.Enabled && row.Key.Checked) { chosen.Add(row.Value.Path); }
+                }
+                return chosen.ToArray();
+            }
+        }
+
+        public CheckBox[] Boxes
+        {
+            get
+            {
+                List<CheckBox> boxes = new List<CheckBox>();
+                foreach (KeyValuePair<CheckBox, PickerItem> row in rows) { boxes.Add(row.Key); }
+                return boxes.ToArray();
+            }
+        }
+
+        private void SetAll(bool value)
+        {
+            foreach (KeyValuePair<CheckBox, PickerItem> row in rows)
+            {
+                if (row.Key.Enabled) { row.Key.Checked = value; }
+            }
+        }
+
+        private void UpdateCount()
+        {
+            int count = ChosenPaths.Length;
+            Add.Text = count == 1 ? "&Add Project" : "&Add " + count + " Projects";
+            Add.Enabled = count > 0;
+        }
+    }
+
+    // Single-line text prompt, used to rename a project.
+    public class TextPromptDialog
+    {
+        public Form Dialog;
+        public Label Message;
+        public TextBox Input;
+        public ThemedButton Ok;
+        public ThemedButton Cancel;
+
+        public TextPromptDialog(string title, string message, string value)
+        {
+            Dialog = DialogLayout.NewDialog(title, new Size(520, 170));
+            Dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+            Message = Theme.NewLabel(message, 9f, FontStyle.Regular, Theme.Muted);
+            Message.TextAlign = ContentAlignment.TopLeft;
+            Message.AutoEllipsis = false;
+            Input = new TextBox();
+            Input.Text = value ?? string.Empty;
+            Input.Font = new Font("Segoe UI", 10f);
+            Input.AccessibleName = title;
+            Theme.StyleInput(Input);
+            Ok = new ThemedButton("OK", ButtonKind.Primary);
+            Cancel = new ThemedButton("Cancel", ButtonKind.Secondary);
+            Ok.DialogResult = DialogResult.OK;
+            Cancel.DialogResult = DialogResult.Cancel;
+            Dialog.AcceptButton = Ok;
+            Dialog.CancelButton = Cancel;
+            Dialog.Controls.AddRange(new Control[] { Message, Input, Cancel, Ok });
+            float s = ThemedButton.DeviceScale(Dialog);
+            int width = Dialog.ClientSize.Width;
+            int margin = (int)(18 * s);
+            Message.SetBounds(margin, (int)(14 * s), width - 2 * margin, (int)(52 * s));
+            Input.SetBounds(margin, Message.Bottom + (int)(6 * s), width - 2 * margin, (int)(28 * s));
+            Ok.SetBounds(width - margin - (int)(96 * s), Dialog.ClientSize.Height - margin - (int)(34 * s), (int)(96 * s), (int)(34 * s));
+            Cancel.SetBounds(Ok.Left - (int)(8 * s) - (int)(96 * s), Ok.Top, (int)(96 * s), (int)(34 * s));
+            Dialog.Shown += delegate(object sender, EventArgs args) { Input.Focus(); Input.SelectAll(); };
+        }
+    }
+
     // All controls of the main dashboard and their layout. PowerShell wires events.
     public class DashboardView
     {
@@ -628,6 +843,7 @@ namespace DroidRun
         public ThemedButton GitPull;
         public ThemedButton InstallApk;
         public ThemedButton Settings;
+        public ThemedButton Rename;
         public ThemedButton Remove;
 
         public CardPanel Operation;
@@ -669,6 +885,8 @@ namespace DroidRun
             Add = new ThemedButton("&Add Project...", ButtonKind.Quiet);
             Projects = new StatusListView();
             Projects.ShowItemToolTips = true;
+            // Several projects can be selected so Refresh checks just those.
+            Projects.MultiSelect = true;
             Projects.AccessibleName = "Projects";
             Projects.AddColumn("Project", 220, CellKind.Project);
             Projects.AddColumn("Git", 250, CellKind.Chip);
@@ -694,9 +912,10 @@ namespace DroidRun
             GitPull = new ThemedButton("&Git Pull", ButtonKind.Quiet);
             InstallApk = new ThemedButton("Install &APK...", ButtonKind.Quiet);
             Settings = new ThemedButton("Se&ttings...", ButtonKind.Quiet);
+            Rename = new ThemedButton("Rena&me...", ButtonKind.Quiet);
             Remove = new ThemedButton("&Remove...", ButtonKind.Quiet);
             Details.Controls.AddRange(new Control[] { DetailName, DetailPath, DetailPlan, DetailFix, DetailSettings,
-                                                      Build, Sync, GitPull, InstallApk, Settings, Remove });
+                                                      Build, Sync, GitPull, InstallApk, Rename, Settings, Remove });
 
             Operation = new CardPanel();
             OperationBadge = new Badge();
@@ -732,7 +951,7 @@ namespace DroidRun
                 control.TabIndex = tab++;
             }
             tab = 0;
-            foreach (Control control in new Control[] { Sync, Build, GitPull, InstallApk, Settings, Remove })
+            foreach (Control control in new Control[] { Sync, Build, GitPull, InstallApk, Rename, Settings, Remove })
             {
                 control.TabIndex = tab++;
             }
@@ -827,7 +1046,8 @@ namespace DroidRun
             int right = width - margin;
             foreach (ThemedButton button in new ThemedButton[] { Refresh, Reports, Scan })
             {
-                int buttonWidth = S(button == Refresh ? 116 : 104);
+                // Refresh's label grows to "Refresh N Selected".
+                int buttonWidth = S(button == Refresh ? 144 : 104);
                 button.SetBounds(right - buttonWidth, S(15), buttonWidth, buttonHeight);
                 right = button.Left - S(8);
             }
@@ -863,7 +1083,7 @@ namespace DroidRun
             // Details card
             Details.SetBounds(margin, detailsTop, inner, detailsHeight);
             int pad = S(14);
-            int actionsWidth = S(400);
+            int actionsWidth = S(470);
             int infoWidth = Math.Max(S(200), inner - 2 * pad - actionsWidth - gap);
             DetailName.SetBounds(pad, S(10), infoWidth, S(26));
             DetailPath.SetBounds(pad, DetailName.Bottom, infoWidth, S(18));
@@ -876,9 +1096,9 @@ namespace DroidRun
             Sync.SetBounds(actionRight - S(140), S(14), S(140), S(36));
             Build.SetBounds(Sync.Left - S(8) - S(140), S(14), S(140), S(36));
             int quietRight = actionRight;
-            foreach (ThemedButton button in new ThemedButton[] { Remove, Settings, InstallApk, GitPull })
+            foreach (ThemedButton button in new ThemedButton[] { Remove, Settings, Rename, InstallApk, GitPull })
             {
-                int buttonWidth = S(button == InstallApk ? 104 : 88);
+                int buttonWidth = S(button == InstallApk ? 104 : 86);
                 button.SetBounds(quietRight - buttonWidth, Sync.Bottom + S(10), buttonWidth, S(30));
                 quietRight = button.Left - S(2);
             }

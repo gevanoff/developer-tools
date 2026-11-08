@@ -8,7 +8,8 @@ param(
     [Parameter(DontShow = $true)][switch]$UiSmokeTestStatusRefresh,
     [Parameter(DontShow = $true)][switch]$UiSmokeTestInheritedOutput,
     [Parameter(DontShow = $true)][string]$UiSmokeTestApkPath,
-    [Parameter(DontShow = $true)][string]$UiSmokeTestPreviewPath
+    [Parameter(DontShow = $true)][string]$UiSmokeTestPreviewPath,
+    [Parameter(DontShow = $true)][string]$UiSmokeTestRefreshOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,6 +17,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 . (Join-Path $PSScriptRoot 'WindowsTaskbarIdentity.ps1')
 . (Join-Path $PSScriptRoot 'DroidRunTheme.ps1')
+. (Join-Path $PSScriptRoot 'DroidRunProjects.ps1')
 [System.Windows.Forms.Application]::EnableVisualStyles()
 $isUiSmokeTest = $UiSmokeTest -or $UiSmokeTestOperation -or $UiSmokeTestOperationSuccess -or
     $UiSmokeTestCancellation -or $UiSmokeTestStatusRefresh -or $UiSmokeTestInheritedOutput -or $UiSmokeTestApkPath
@@ -157,6 +159,7 @@ $stateRoot = if ($env:LOCALAPPDATA) {
 $logRoot = Join-Path $stateRoot 'logs'
 $projectsPath = Join-Path $stateRoot 'projects.json'
 $preferencesPath = Join-Path $stateRoot 'project-preferences.json'
+$namesPath = Join-Path $stateRoot 'project-names.json'
 $runner = Join-Path $PSScriptRoot 'Run-AndroidBuildInstall.ps1'
 $settingsEditor = Join-Path $PSScriptRoot 'Edit-AndroidProjectPreferences.ps1'
 $gitUpdater = Join-Path $PSScriptRoot 'Update-AndroidRepo.ps1'
@@ -264,11 +267,81 @@ function Remember-Project {
 }
 
 function Browse-ForProject {
+    param([System.Windows.Forms.IWin32Window]$Owner)
     $picker = New-Object System.Windows.Forms.FolderBrowserDialog
-    $picker.Description = 'Choose an Android repository or project folder'
-    $picker.ShowNewFolderButton = $false
-    if ($picker.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return $null }
-    return $picker.SelectedPath
+    try {
+        $picker.Description = 'Choose a repository or project folder. DroidRun lists the Android projects it finds inside.'
+        $picker.ShowNewFolderButton = $false
+        $result = if ($null -ne $Owner) { $picker.ShowDialog($Owner) } else { $picker.ShowDialog() }
+        if ($result -ne [System.Windows.Forms.DialogResult]::OK) { return $null }
+        return $picker.SelectedPath
+    }
+    finally { $picker.Dispose() }
+}
+
+function Select-ProjectsToAdd {
+    # Lists the projects found in Folder and returns the paths the user chose to add.
+    param(
+        [Parameter(Mandatory = $true)][string]$Folder,
+        [System.Windows.Forms.IWin32Window]$Owner,
+        [string[]]$Existing = @()
+    )
+
+    $previousCursor = [System.Windows.Forms.Cursor]::Current
+    [System.Windows.Forms.Cursor]::Current = [System.Windows.Forms.Cursors]::WaitCursor
+    try { $found = Find-DroidRunProjects -Folder $Folder }
+    finally { [System.Windows.Forms.Cursor]::Current = $previousCursor }
+    $candidates = @($found.Candidates)
+    $isExisting = { param($path) @($Existing | Where-Object { $_ -ieq $path }).Count -gt 0 }
+
+    if ($candidates.Count -eq 0) {
+        $answer = [System.Windows.Forms.MessageBox]::Show($Owner,
+            "No Android projects were found in $($found.Root).`n`nDroidRun looks up to 4 folders deep for gradlew.bat, project.godot, or android-build-install.json. Add this folder anyway? You can set up a custom build for it later in Settings.",
+            'No projects found', [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question, [System.Windows.Forms.MessageBoxDefaultButton]::Button2)
+        if ($answer -eq [System.Windows.Forms.DialogResult]::Yes) { return $found.Root }
+        return
+    }
+
+    $only = $candidates[0]
+    if ($candidates.Count -eq 1 -and $only.Relative -eq '.' -and $only.Recommended -and -not (& $isExisting $only.Path)) {
+        return $only.Path  # The chosen folder is the project; nothing to choose.
+    }
+
+    $newCount = @($candidates | Where-Object { -not (& $isExisting $_.Path) }).Count
+    $intro = if ($only.Outside) {
+        'There are no projects beneath this folder, but it is inside this project. Add it instead?'
+    } elseif ($newCount -eq 0) {
+        "All $($candidates.Count) projects found here are already in DroidRun."
+    } else {
+        $plural = if ($candidates.Count -eq 1) { '' } else { 's' }
+        "Found $($candidates.Count) project$plural. Choose the ones to add. Unchecked ones may not build yet; the reason is shown under each."
+    }
+    if ($found.Truncated) {
+        $intro += ' The search stopped early because this folder is very large; choose a folder closer to the projects to see everything.'
+    }
+
+    $dot = "  $([char]0x00B7)  "
+    $items = foreach ($candidate in $candidates) {
+        $added = & $isExisting $candidate.Path
+        $location = if ($candidate.Relative -eq '.') { 'this folder' } else { $candidate.Relative }
+        $detail = "$($candidate.Kind)$dot$location"
+        if ($added) { $detail += "${dot}already in DroidRun" }
+        $note = if ($added) { '' } else { [string]$candidate.Note }
+        [DroidRun.PickerItem]::new([string]$candidate.Path, (Split-Path -Leaf $candidate.Path), $detail, $note,
+            [bool]($candidate.Recommended -and -not $added), [bool](-not $added))
+    }
+    $rootName = Split-Path -Leaf $found.Root
+    if (-not $rootName) { $rootName = $found.Root }
+    $picker = [DroidRun.ProjectPickerDialog]::new("Add projects from $rootName", $found.Root, $intro, [DroidRun.PickerItem[]]@($items))
+    try {
+        if ($null -ne $appIcon) { $picker.Dialog.Icon = $appIcon }
+        $result = if ($null -ne $Owner) { $picker.Dialog.ShowDialog($Owner) } else { $picker.Dialog.ShowDialog() }
+        if ($result -ne [System.Windows.Forms.DialogResult]::OK) { return }
+        # Callers wrap the result in @() so one path stays an array.
+        return $picker.ChosenPaths
+    }
+    finally { $picker.Dialog.Dispose() }
 }
 
 function Get-ProjectPreference {
@@ -324,7 +397,7 @@ function Get-LogSummary {
     return [pscustomobject]@{
         Time = $File.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss')
         Status = if ($null -eq $exitCode) { 'Incomplete' } elseif ($exitCode -eq 0) { 'Success' } else { 'Failed' }
-        Project = if ($projectPath) { Split-Path -Leaf $projectPath } else { '(unknown)' }
+        Project = if ($projectPath) { Get-DroidRunProjectName -Path $projectPath -Names $script:reportNames -NamesPath $namesPath } else { '(unknown)' }
         Path = $File.FullName
     }
 }
@@ -379,6 +452,7 @@ function Show-Reports {
     $form.Controls.Add($empty)
     $empty.BringToFront()
 
+    $script:reportNames = Get-DroidRunProjectNames -NamesPath $namesPath
     foreach ($file in @(Get-ChildItem -LiteralPath $logRoot -Filter 'android-build-install-*.log' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)) {
         $summary = Get-LogSummary -File $file
         $item = New-Object System.Windows.Forms.ListViewItem($summary.Time)
@@ -523,8 +597,9 @@ function Show-DeviceScan {
         $list.Columns[3].Width = [Math]::Max(180, $list.ClientSize.Width - $fixedWidth - 2)
     })
 
+    $scanNames = Get-DroidRunProjectNames -NamesPath $namesPath
     foreach ($result in $results) {
-        $item = New-Object System.Windows.Forms.ListViewItem([string]$result.Project)
+        $item = New-Object System.Windows.Forms.ListViewItem((Get-DroidRunProjectName -Path ([string]$result.ProjectPath) -Names $scanNames))
         $item.Tag = [string]$result.ProjectPath
         [void]$item.SubItems.Add([string]$result.Device)
         $status = $item.SubItems.Add([string]$result.DeviceStatus)
@@ -554,7 +629,8 @@ function Invoke-ProjectSettings {
         return
     }
 
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $settingsEditor -Project $ProjectPath -PreferencesPath $preferencesPath
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $settingsEditor -Project $ProjectPath -PreferencesPath $preferencesPath `
+        -DisplayName (Get-DroidRunProjectName -Path $ProjectPath -NamesPath $namesPath)
 }
 
 function Select-SavedProjectAction {
@@ -608,6 +684,7 @@ function Select-SavedProjectAction {
     $gitPull = $view.GitPull
     $installApk = $view.InstallApk
     $settings = $view.Settings
+    $rename = $view.Rename
     $sync = $view.Sync
     $build = $view.Build
     $copyOutput.Enabled = $false
@@ -620,7 +697,8 @@ function Select-SavedProjectAction {
     $toolTips.SetToolTip($gitPull, 'git pull --ff-only. Stops on local changes or a diverged branch.')
     $toolTips.SetToolTip($installApk, 'Install an existing APK file without building or changing Git.')
     $toolTips.SetToolTip($remove, 'Forget this project. The folder and its settings are not changed.')
-    $toolTips.SetToolTip($refresh, 'Fetch Git remotes and recheck builds and the device.')
+    $toolTips.SetToolTip($rename, 'Change the name shown in DroidRun (F2). The folder is not renamed.')
+    $toolTips.SetToolTip($refresh, 'Fetch Git remotes and recheck builds and the device for the selected projects, or every project when none is selected. Esc clears the selection.')
 
     $trayIcon = $null
     $trayMenu = $null
@@ -665,13 +743,27 @@ function Select-SavedProjectAction {
         return [string]$list.SelectedItems[0].Tag
     }
 
+    # Selected project paths in list order (several can be selected to refresh just those).
+    $selectedPaths = {
+        # Callers wrap the result in @() so one path stays an array.
+        foreach ($item in $list.Items) { if ($item.Selected) { [string]$item.Tag } }
+    }
+
     $refreshSummary = {
         $path = & $selectedPath
         if (-not $path) {
-            $hintText = if ($list.Items.Count -eq 0) {
+            $chosen = @(& $selectedPaths)
+            if ($chosen.Count -gt 1) {
+                $names = Get-DroidRunProjectNames -NamesPath $namesPath
+                $nameList = @($chosen | ForEach-Object { Get-DroidRunProjectName -Path $_ -Names $names }) -join ', '
+                $view.SetDetails("$($chosen.Count) projects selected", $nameList,
+                    'Refresh checks only these projects. Select one project to build, install, rename, or change its settings.', '', '', '')
+                return
+            }
+            $hintText = if ($view.Projects.Items.Count -eq 0) {
                 'Add a project to build, install, and run it.'
             } else {
-                'Select a project to see what Sync & Run will do.'
+                'Select a project to build and run it. With none selected, Refresh checks every project.'
             }
             $view.SetDetails('No project selected', '', $hintText, '', '', '')
             return
@@ -688,7 +780,7 @@ function Select-SavedProjectAction {
         $deviceText = if ($pref.deviceSerial) { $pref.deviceSerial } else { 'automatic' }
         $launchText = if ($pref.autoLaunch) { 'on' } else { 'off' }
         $settingsText = (@("Task $($pref.gradleTask)", "APK $apkText", "JDK $javaText", "Device $deviceText", "Auto-launch $launchText") -join $dot)
-        $view.SetDetails((Split-Path -Leaf $path), $path, "$marker  $($preview.Headline)", $planTone, $preview.Fix, $settingsText)
+        $view.SetDetails((Get-DroidRunProjectName -Path $path -NamesPath $namesPath), $path, "$marker  $($preview.Headline)", $planTone, $preview.Fix, $settingsText)
     }
 
     $dashboardState = [pscustomobject]@{
@@ -724,7 +816,7 @@ function Select-SavedProjectAction {
         }
 
         while ($item.SubItems.Count -lt 5) { [void]$item.SubItems.Add('') }
-        $item.Text = [string]$Result.Project
+        $item.Text = Get-DroidRunProjectName -Path ([string]$Result.ProjectPath) -NamesPath $namesPath
         $gitDisplay = if ($Result.GitBranch) { "$($Result.GitBranch) | $($Result.GitStatus)" } else { [string]$Result.GitStatus }
         # Each status cell is drawn as a chip; the branch is shown before the Git chip.
         $item.SubItems[1].Text = [string]$Result.GitStatus
@@ -784,6 +876,9 @@ function Select-SavedProjectAction {
         if ($null -ne $trayIcon) { $trayIcon.Text = 'DroidRun' }
         $statusTimestamp.Text = if ($Message) {
             $Message
+        } elseif ($total -lt @(Get-SavedProjects).Count) {
+            $scope = if ($total -eq 1) { '1 project' } else { "$total projects" }
+            "Checked ${scope}: $(Get-Date -Format 'HH:mm:ss') ($completed/$total)"
         } else {
             "Last checked: $(Get-Date -Format 'HH:mm:ss') ($completed/$total)"
         }
@@ -793,7 +888,7 @@ function Select-SavedProjectAction {
         if ($UiSmokeTestStatusRefresh) {
             Write-Host "UI status smoke result: $completed/$total"
             foreach ($item in $list.Items) {
-                Write-Host "UI status row: $($item.Text) | $($item.SubItems[1].Text) | $($item.SubItems[2].Text) | $($item.SubItems[3].Text)"
+                Write-Host "UI status row: $($item.Text) | $($item.SubItems[1].Text) | $($item.SubItems[2].Text) | $($item.SubItems[3].Text) | $($item.SubItems[4].Text)"
             }
             $form.Close()
             return
@@ -842,7 +937,7 @@ function Select-SavedProjectAction {
         $refreshState.CurrentStartedAt = Get-Date
         $refreshState.TimedOut = $false
         $position = $refreshState.Index + 1
-        $statusTimestamp.Text = "Checking $position/$($refreshState.Projects.Count): $(Split-Path -Leaf $projectPath)"
+        $statusTimestamp.Text = "Checking $position/$($refreshState.Projects.Count): $(Get-DroidRunProjectName -Path $projectPath -NamesPath $namesPath)"
         $form.Text = 'DroidRun - Refreshing status...'
         if ($null -ne $trayIcon) { $trayIcon.Text = "DroidRun - Status $position/$($refreshState.Projects.Count)" }
 
@@ -924,11 +1019,17 @@ function Select-SavedProjectAction {
     })
 
     $refreshRows = {
-        param([bool]$FetchRemote = $true)
+        # Rebuilds the list from the saved projects and checks Only (or every project when
+        # Only is empty). Rows that are not checked keep their previous result.
+        param([bool]$FetchRemote = $true, [string[]]$Only = @())
 
         if ($null -ne $dashboardState.StatusRefresh -or $null -ne $dashboardState.Operation) { return }
         $projects = @(Get-SavedProjects)
-        $selectedBefore = & $selectedPath
+        $targets = if (@($Only).Count -gt 0) {
+            @($projects | Where-Object { $project = $_; @($Only | Where-Object { $_ -ieq $project }).Count -gt 0 })
+        } else { $projects }
+        $names = Get-DroidRunProjectNames -NamesPath $namesPath
+        $selectedBefore = @(& $selectedPaths)
         $cached = @{}
         foreach ($existing in $list.Items) {
             $values = @()
@@ -949,43 +1050,48 @@ function Select-SavedProjectAction {
             $list.Items.Clear()
             foreach ($projectPath in $projects) {
                 $entry = $cached[[string]$projectPath]
+                $isTarget = @($targets | Where-Object { $_ -ieq $projectPath }).Count -gt 0
+                $displayName = Get-DroidRunProjectName -Path $projectPath -Names $names
                 if ($null -ne $entry -and $entry.Values.Count -ge 4) {
                     # Keep the previous result visible until this project is rechecked.
-                    $item = New-Object System.Windows.Forms.ListViewItem($entry.Values[0])
+                    $item = New-Object System.Windows.Forms.ListViewItem($displayName)
                     for ($index = 1; $index -lt 4; $index++) {
                         $subItem = $item.SubItems.Add($entry.Values[$index])
                         $subItem.Tag = $entry.Tags[$index]
                     }
-                    [void]$item.SubItems.Add('Queued')
+                    $checkedText = if ($isTarget) { 'Queued' } elseif ($entry.Values.Count -ge 5) { $entry.Values[4] } else { 'Not checked' }
+                    [void]$item.SubItems.Add($checkedText)
                     $item.ToolTipText = $entry.ToolTipText
                 }
                 else {
-                    $item = New-Object System.Windows.Forms.ListViewItem((Split-Path -Leaf $projectPath))
+                    $item = New-Object System.Windows.Forms.ListViewItem($displayName)
+                    $placeholder = if ($isTarget) { 'Checking...' } else { 'Unknown' }
                     for ($index = 1; $index -lt 4; $index++) {
-                        $subItem = $item.SubItems.Add('Checking...')
-                        $subItem.Tag = New-DroidRunChipCell -Status 'Checking...'
+                        $subItem = $item.SubItems.Add($placeholder)
+                        $subItem.Tag = New-DroidRunChipCell -Status $placeholder
                     }
-                    [void]$item.SubItems.Add('Queued')
+                    [void]$item.SubItems.Add($(if ($isTarget) { 'Queued' } else { 'Not checked' }))
                 }
                 $item.Tag = $projectPath
                 [void]$list.Items.Add($item)
-                if ($selectedBefore -and $projectPath -ieq $selectedBefore) { $item.Selected = $true }
+                if (@($selectedBefore | Where-Object { $_ -ieq $projectPath }).Count -gt 0) { $item.Selected = $true }
             }
         }
         finally { $list.EndUpdate() }
 
-        if ($list.SelectedItems.Count -eq 0 -and $list.Items.Count -gt 0) { $list.Items[0].Selected = $true }
+        # Nothing is selected by default, so Refresh All means every project.
         $view.ShowEmpty($projects.Count -eq 0)
         $view.ProjectsTitle.Text = if ($projects.Count -gt 0) { "Projects ($($projects.Count))" } else { 'Projects' }
         & $refreshSummary
-        if ($projects.Count -eq 0) {
-            $statusTimestamp.Text = 'No saved projects.'
+        if ($projects.Count -eq 0 -or $targets.Count -eq 0) {
+            if ($projects.Count -eq 0) { $statusTimestamp.Text = 'No saved projects.' }
             & $refreshSummary
+            & $setOperationControls
             return
         }
 
         $dashboardState.StatusRefresh = [pscustomobject]@{
-            Projects = $projects
+            Projects = $targets
             Index = 0
             Completed = 0
             FetchRemote = $FetchRemote
@@ -1032,9 +1138,10 @@ function Select-SavedProjectAction {
         $reports.Enabled = -not $busy
         $scan.Enabled = -not $anyBusy
         $refresh.Enabled = -not $busy
-        $refresh.Text = if ($statusBusy) { '&Cancel Refresh' } else { 'Re&fresh Status' }
+        $refresh.Text = if ($statusBusy) { '&Cancel Refresh' } else { Get-DroidRunRefreshLabel -SelectedCount $list.SelectedItems.Count }
         $gitPull.Enabled = $selected -and -not $anyBusy
         $settings.Enabled = $selected -and -not $anyBusy
+        $rename.Enabled = $selected -and -not $anyBusy
         $sync.Enabled = $selected -and -not $anyBusy
         $build.Enabled = $selected -and -not $anyBusy
         $installApk.Enabled = $selected -and -not $anyBusy
@@ -1317,10 +1424,67 @@ function Select-SavedProjectAction {
     })
 
     $add.Add_Click({
-        $path = Browse-ForProject
-        if (-not $path) { return }
-        try { [void](Remember-Project -Path $path) } catch { return }
-        & $refreshRows $false
+        $folder = Browse-ForProject -Owner $form
+        if (-not $folder) { return }
+        try { $chosen = @(Select-ProjectsToAdd -Folder $folder -Owner $form -Existing @(Get-SavedProjects)) }
+        catch {
+            [void][System.Windows.Forms.MessageBox]::Show($form, "Could not search $folder for projects: $($_.Exception.Message)", 'Add projects')
+            return
+        }
+        if ($chosen.Count -eq 0) { return }
+        $added = New-Object System.Collections.Generic.List[string]
+        # Remember-Project puts each path first, so add in reverse to keep the listed order.
+        for ($index = $chosen.Count - 1; $index -ge 0; $index--) {
+            try { $added.Insert(0, (Remember-Project -Path $chosen[$index])) } catch { }
+        }
+        if ($added.Count -eq 0) { return }
+        $list.SelectedItems.Clear()
+        & $refreshRows $true $added.ToArray()
+        foreach ($item in $list.Items) {
+            if (@($added | Where-Object { $_ -ieq [string]$item.Tag }).Count -gt 0) { $item.Selected = $true; $item.EnsureVisible() }
+        }
+    })
+
+    $renameProject = {
+        $path = & $selectedPath
+        if (-not $path -or $null -ne $dashboardState.Operation -or $null -ne $dashboardState.StatusRefresh) { return }
+        $folderName = Split-Path -Leaf $path
+        $prompt = [DroidRun.TextPromptDialog]::new('Rename project',
+            "Name shown in DroidRun for $path.`nLeave it empty to use the folder name ($folderName). The folder itself is not renamed.",
+            (Get-DroidRunProjectName -Path $path -NamesPath $namesPath))
+        try {
+            if ($null -ne $appIcon) { $prompt.Dialog.Icon = $appIcon }
+            if ($prompt.Dialog.ShowDialog($form) -ne [System.Windows.Forms.DialogResult]::OK) { return }
+            $shown = Set-DroidRunProjectName -Path $path -Name $prompt.Input.Text -NamesPath $namesPath
+        }
+        catch {
+            [void][System.Windows.Forms.MessageBox]::Show($form, "The name could not be saved: $($_.Exception.Message)", 'Rename project')
+            return
+        }
+        finally { $prompt.Dialog.Dispose() }
+        foreach ($item in $list.Items) {
+            if (([string]$item.Tag) -ieq $path) { $item.Text = $shown }
+        }
+        $list.Invalidate()
+        & $refreshSummary
+    }
+    $rename.Add_Click($renameProject)
+
+    $list.Add_KeyDown({
+        param($sender, $eventArgs)
+        if ($eventArgs.KeyCode -eq [System.Windows.Forms.Keys]::F2) {
+            & $renameProject
+            $eventArgs.Handled = $true
+        }
+        elseif ($eventArgs.KeyCode -eq [System.Windows.Forms.Keys]::Escape) {
+            # Clear the selection so Refresh checks every project.
+            $list.SelectedItems.Clear()
+            $eventArgs.Handled = $true
+        }
+        elseif ($eventArgs.Control -and $eventArgs.KeyCode -eq [System.Windows.Forms.Keys]::A) {
+            foreach ($item in $list.Items) { $item.Selected = $true }
+            $eventArgs.Handled = $true
+        }
     })
 
     $remove.Add_Click({
@@ -1328,7 +1492,7 @@ function Select-SavedProjectAction {
         if (-not $path) { return }
         $answer = [System.Windows.Forms.MessageBox]::Show(
             $form,
-            "Remove $(Split-Path -Leaf $path) from DroidRun?`n`nThe folder, its files, and its saved settings are not changed. You can add it again later.",
+            "Remove $(Get-DroidRunProjectName -Path $path -NamesPath $namesPath) from DroidRun?`n`nThe folder, its files, and its saved settings are not changed. You can add it again later.",
             'Remove project',
             [System.Windows.Forms.MessageBoxButtons]::YesNo,
             [System.Windows.Forms.MessageBoxIcon]::Question,
@@ -1354,7 +1518,9 @@ function Select-SavedProjectAction {
             }
             return
         }
-        & $refreshRows $true
+        # The selected projects, or every project when none is selected.
+        $targets = @(Get-DroidRunRefreshTargets -Projects @(Get-SavedProjects) -Selected @(& $selectedPaths))
+        & $refreshRows $true $targets
     })
     $gitPull.Add_Click({
         $path = & $selectedPath
@@ -1391,7 +1557,7 @@ function Select-SavedProjectAction {
         & $refreshSummary
         & $appendOperationOutput @('Sync & Run', '==========', 'Git:    Behind 2', 'Build:  Stale', 'Device: Different', '', 'Completed successfully. Exit code: 0')
         $view.SetOperationState('success', 'Sync & Run completed', 'in 41.2 seconds.')
-        foreach ($button in @($sync, $build, $gitPull, $installApk, $settings, $remove)) { $button.Enabled = $true }
+        foreach ($button in @($sync, $build, $gitPull, $installApk, $rename, $settings, $remove)) { $button.Enabled = $true }
     }
 
     $savePreview = {
@@ -1421,13 +1587,59 @@ function Select-SavedProjectAction {
                 throw "Taskbar identity could not be applied: $($taskbarIdentityState.Error)"
             }
             Write-Host "UI taskbar identity: $appUserModelId"
-            if ($UiSmokeTestPreviewPath) { & $loadPreviewFixture }
+            & $loadPreviewFixture
+
+            # Refresh scope follows the selection: none selected means every project.
+            $list.SelectedItems.Clear()
+            [System.Windows.Forms.Application]::DoEvents()
+            if ($refresh.Text -ne 'Re&fresh All') { throw "Refresh label with no selection was '$($refresh.Text)'." }
+            $list.Items[1].Selected = $true
+            $list.Items[3].Selected = $true
+            [System.Windows.Forms.Application]::DoEvents()
+            if ($refresh.Text -ne 'Re&fresh 2 Selected') { throw "Refresh label with two selected was '$($refresh.Text)'." }
+            if ($sync.Enabled -or $rename.Enabled) { throw 'Single-project actions stayed enabled with two projects selected.' }
+            $targets = @(Get-DroidRunRefreshTargets -Projects @($list.Items | ForEach-Object { [string]$_.Tag }) -Selected @(& $selectedPaths))
+            if ($targets.Count -ne 2 -or $targets[0] -ne [string]$list.Items[1].Tag) { throw 'Refresh targets did not follow the selection.' }
+            $list.SelectedItems.Clear()
+            $list.Items[0].Selected = $true
+            [System.Windows.Forms.Application]::DoEvents()
+            if ($refresh.Text -ne 'Re&fresh Selected' -or -not $rename.Enabled) { throw 'One selected project did not enable Rename and Refresh Selected.' }
+            Write-Host 'UI refresh scope: All / Selected / 2 Selected'
+
+            # The Add Projects picker and the Rename prompt build and lay out without overlap.
+            $pickerItems = [DroidRun.PickerItem[]]@(
+                [DroidRun.PickerItem]::new('C:\repo\phone', 'phone', 'Gradle  -  phone', '', $true, $true),
+                [DroidRun.PickerItem]::new('C:\repo\server', 'server', 'Gradle  -  server', 'No Android app module found (no AndroidManifest.xml).', $false, $true),
+                [DroidRun.PickerItem]::new('C:\repo\old', 'old', 'Gradle  -  old  -  already in DroidRun', '', $false, $false)
+            )
+            $picker = [DroidRun.ProjectPickerDialog]::new('Add projects from repo', 'C:\repo', 'Found 3 projects.', $pickerItems)
+            try {
+                $picker.Dialog.Show($form)
+                [System.Windows.Forms.Application]::DoEvents()
+                if ((@($picker.ChosenPaths) -join '|') -ne 'C:\repo\phone') { throw "Picker preselection was '$(@($picker.ChosenPaths) -join '|')'." }
+                if ($picker.Add.Text -ne '&Add Project') { throw "Picker button read '$($picker.Add.Text)'." }
+                $picker.SelectAll.PerformClick()
+                if (@($picker.ChosenPaths).Count -ne 2) { throw 'Select all included a project that is already added.' }
+                foreach ($button in @($picker.SelectAll, $picker.Clear, $picker.Cancel, $picker.Add)) {
+                    if (-not $picker.Dialog.ClientRectangle.Contains($button.Bounds)) { throw "Picker button $($button.Text) is clipped." }
+                }
+                if ($picker.Cancel.Bounds.IntersectsWith($picker.Add.Bounds)) { throw 'Picker buttons overlap.' }
+            }
+            finally { $picker.Dialog.Dispose() }
+            $prompt = [DroidRun.TextPromptDialog]::new('Rename project', 'Name shown in DroidRun.', 'Chess')
+            try {
+                $prompt.Dialog.Show($form)
+                [System.Windows.Forms.Application]::DoEvents()
+                if (-not $prompt.Dialog.ClientRectangle.Contains($prompt.Ok.Bounds) -or $prompt.Input.Text -ne 'Chess') { throw 'Rename prompt layout failed.' }
+            }
+            finally { $prompt.Dialog.Dispose() }
+            Write-Host 'UI add-projects picker and rename prompt: built and laid out'
             foreach ($size in @(@(900, 680), @(1180, 760), @(1600, 900))) {
                 $form.ClientSize = New-Object System.Drawing.Size($size[0], $size[1])
                 & $layoutDashboard
                 [System.Windows.Forms.Application]::DoEvents()
                 # Every action button must sit fully inside its card and not overlap another.
-                $buttons = @($sync, $build, $gitPull, $installApk, $settings, $remove, $refresh, $scan, $reports,
+                $buttons = @($sync, $build, $gitPull, $installApk, $rename, $settings, $remove, $refresh, $scan, $reports,
                     $add, $copyOutput)
                 foreach ($button in $buttons) {
                     if (-not $button.Parent.ClientRectangle.Contains($button.Bounds)) {
@@ -1483,7 +1695,8 @@ function Select-SavedProjectAction {
         if ($InitialProject -and -not $UiSmokeTestStatusRefresh) {
             $dashboardState.PendingInitialProject = $InitialProject
         }
-        & $refreshRows $true
+        if ($UiSmokeTestRefreshOnly) { & $refreshRows $true @($UiSmokeTestRefreshOnly) }
+        else { & $refreshRows $true }
 
         if ($InitialProject) {
             foreach ($item in $list.Items) {
