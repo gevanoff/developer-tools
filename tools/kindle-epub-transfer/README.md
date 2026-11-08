@@ -40,6 +40,10 @@ python .\kindle_transfer.py publish --state C:/Books/Transfer --destination "G:/
 ```
 
 `Run-KindleTransfer.ps1 -Action scan|convert|publish` uses the local settings file.
+`convert` prints `[n/total]` before each book and ends with a summary: how many
+books were converted, already verified, and failed, each failure with its reason,
+and where the EPUBs are. `publish` ends with how many files were copied and how
+many were already present.
 The double-click launcher converts locally; it does not silently upload books.
 
 For unattended cloud sync, configure Google Drive for desktop and set `destination`
