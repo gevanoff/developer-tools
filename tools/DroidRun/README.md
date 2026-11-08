@@ -417,7 +417,7 @@ and a non-destructive expected failure path.
 - richer Android App Bundle / split-install workflows;
 - optional per-project launch activity override for apps without a conventional launcher activity.
 
-Backend regression tests (also run by the Windows CI workflow):
+Backend regression tests (run locally using `scripts/check-windows.ps1` from the repository root):
 
 ```powershell
 .\Test-AndroidBuildBackends.ps1
