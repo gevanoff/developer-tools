@@ -20,7 +20,19 @@ $bar.Controls.Add($fill)
 $sizeMenu=New-Object Windows.Forms.ToolStripMenuItem('Panel size')
 [void]$menu.Items.Insert(3,$sizeMenu)
 $form.ContextMenuStrip=$menu
-$title.Text='CODEX ALLOWANCE  /  right-click for size'
+$title.Text='CODEX ALLOWANCE'
+# Hierarchy: the percentage is brightest; the title and footer are quieter.
+$mutedColor=[Drawing.ColorTranslator]::FromHtml('#94A3B8')
+$title.ForeColor=$mutedColor
+$status.ForeColor=$mutedColor
+foreach($button in @($refresh,$collapse,$dashboard)){
+ $button.FlatAppearance.BorderColor=[Drawing.Color]::FromArgb(64,74,88)
+ $button.FlatAppearance.MouseOverBackColor=[Drawing.Color]::FromArgb(52,61,73)
+ $button.FlatAppearance.MouseDownBackColor=[Drawing.Color]::FromArgb(64,74,88)
+}
+# The size menu used to be advertised in the title; a tooltip keeps it discoverable.
+$hintTip=New-Object Windows.Forms.ToolTip
+foreach($control in @($form,$title,$big,$bar,$windows,$resets,$status)){$hintTip.SetToolTip($control,'Right-click for panel size, refresh, and other options.')}
 function Get-MeterColor($remaining,$unavailable=$false,$blocked=$false) {
  if($unavailable -or $null -eq $remaining){return [Drawing.ColorTranslator]::FromHtml('#94A3B8')}
  if($blocked -or $remaining -le 10){return [Drawing.ColorTranslator]::FromHtml('#F87171')}
@@ -30,6 +42,8 @@ function Get-MeterColor($remaining,$unavailable=$false,$blocked=$false) {
 }
 function Set-MeterColor($remaining,$unavailable=$false,$blocked=$false) {
  $color=Get-MeterColor $remaining $unavailable $blocked
+ # The footer explains stale or blocked readings; tint it so the warning stands out.
+ $status.ForeColor=if($blocked){[Drawing.ColorTranslator]::FromHtml('#F87171')}elseif($unavailable){[Drawing.ColorTranslator]::FromHtml('#FBBF24')}else{$mutedColor}
  $accent.BackColor=$color; $fill.BackColor=$color
  $fill.Width=if($null -eq $remaining){0}else{[int]($bar.Width*[Math]::Max(0,[Math]::Min(100,$remaining))/100)}
  $key=$color.ToArgb().ToString()
@@ -64,14 +78,13 @@ function Sync-TitleTheme {
 function Set-Layout($name) {
  $script:layoutName=$name
  $form.SuspendLayout()
- $title.Text='CODEX ALLOWANCE  /  right-click for size'
+ $title.Text='CODEX ALLOWANCE'
  $title.Visible=$name -ne 'Compact'
  foreach($button in @($refresh,$collapse,$dashboard)){$button.Visible=$name -in @('Standard','Large')}
  switch($name){
   'Mini' {
    $w=240;$h=205
    Place-Control $title 12 10 216 18 8
-   $title.Text='CODEX / right-click for options'
    Place-Control $big 12 30 216 40 22
    Place-Control $bar 12 76 216 6 0
    Place-Control $resets 12 90 216 23 10
