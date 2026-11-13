@@ -11,6 +11,7 @@ The repository is organized as a collection rather than around a single applicat
 | [Codex Usage Meter](tools/codex-usage-meter/) | Windows | Floating Codex allowance panel with tray collapse, reset countdowns, and available resets; refreshes without model calls. |
 | [DroidRun](tools/DroidRun/) | Windows | Build, synchronize, install, compare, and launch Android development APKs from a Windows dashboard. |
 | [DroidRun for Linux](tools/DroidRun-Linux/) | Linux / Ubuntu | Linux counterpart to DroidRun, using XDG paths and native Linux tooling conventions. |
+| [Drive Folder Backup](tools/drive-folder-backup/) | Windows | Back up arbitrary local folders to Google Drive with an incremental, non-deleting copy and live progress. |
 | `google-drive-zip-merger` | Windows | Merge the multiple ZIP archives produced by large Google Drive folder downloads into one destination tree. |
 | [Kindle EPUB Transfer](tools/kindle-epub-transfer/) | Windows | Preserve Kindle originals, convert supported purchases to verified EPUBs, and copy results to a Drive sync folder. |
 
