@@ -25,7 +25,8 @@ class BackupWindow:
         self.settings = load_settings(self.config_path)
         self.rclone = resolve_rclone()
         self.remotes: list[str] = []
-        self.events: queue.Queue[tuple[str, object]] = queue.Queue()
+        self.events: queue.Queue[tuple[str, object]] = queue.Queue(maxsize=2500)
+        self.dropped_lines = 0
         self.stop_requested = threading.Event()
         self.worker: threading.Thread | None = None
         self.process: subprocess.Popen | None = None
@@ -193,6 +194,7 @@ class BackupWindow:
             messagebox.showerror("Cannot start", str(exc), parent=self.window)
             return
         self.stop_requested.clear()
+        self.dropped_lines = 0
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         log_path = state_directory() / "logs" / f"{stamp}-{uuid.uuid4().hex[:8]}.log"
         self.set_running(True)
@@ -218,7 +220,10 @@ class BackupWindow:
                     def emit(line: str) -> None:
                         log.write(line.rstrip("\r\n") + "\n")
                         log.flush()
-                        self.events.put(("log", line))
+                        try:
+                            self.events.put_nowait(("log", line))
+                        except queue.Full:
+                            self.dropped_lines += 1
                     emit(f"[{index}/{len(folders)}] {folder}")
                     if not Path(folder).is_dir():
                         failures += 1
@@ -252,6 +257,10 @@ class BackupWindow:
                 state = "Cancelled" if self.stop_requested.is_set() else (
                     "Failed" if failures else ("Preview complete" if dry_run else "Backup complete"))
                 emit(f"{state}: {completed} successful, {failures} failed; {len(folders)} selected.")
+                if self.dropped_lines:
+                    note = f"{self.dropped_lines} lines omitted from the live display; full log: {log_path}"
+                    log.write(note + "\n")
+                    self.events.put(("log", note))
             self.events.put(("done", state))
         except Exception as exc:
             self.events.put(("log", f"ERROR: {type(exc).__name__}: {exc}"))
@@ -269,7 +278,7 @@ class BackupWindow:
 
     def poll(self) -> None:
         try:
-            while True:
+            for _ in range(150):
                 kind, payload = self.events.get_nowait()
                 if kind == "log":
                     self.append_log(str(payload))
