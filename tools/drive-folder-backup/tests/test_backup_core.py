@@ -1,5 +1,6 @@
-import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -55,13 +56,44 @@ class PlanningTests(unittest.TestCase):
             self.assertEqual(list(p.parent.iterdir()), [p])
 
     def test_drive_remote_only(self):
-        fake = subprocess.CompletedProcess(['rclone'], 0, 'other:\ngdrive:\nmydrive:\n', '')
+        fake = subprocess.CompletedProcess(['rclone'], 0, 'other: local\ngdrive: drive\nmydrive: drive\n', '')
         with patch('backup_core.subprocess.run', return_value=fake) as call:
-            self.assertEqual(discover_drive_remotes('rclone'), ['gdrive:', 'mydrive:', 'other:'])
-            self.assertEqual(call.call_args.args[0], ['rclone', 'listremotes', '--type', 'drive', '--exact'])
+            self.assertEqual(discover_drive_remotes('rclone'), ['gdrive:', 'mydrive:'])
+            self.assertEqual(call.call_args.args[0], ['rclone', 'listremotes', '--long'])
         with patch('backup_core.subprocess.run', return_value=subprocess.CompletedProcess(['rclone'], 1, '', 'not configured')):
             with self.assertRaises(BackupError):
                 discover_drive_remotes('rclone')
+
+    @unittest.skipUnless(shutil.which('rclone'), 'rclone is not installed')
+    def test_discover_with_installed_rclone_and_isolated_config(self):
+        with tempfile.TemporaryDirectory(prefix='rclone test ') as base:
+            config = Path(base) / 'rclone config.conf'
+            config.write_text('[google]\ntype = drive\n[local]\ntype = local\n', encoding='utf-8')
+            with patch.dict(os.environ, {'RCLONE_CONFIG': str(config)}):
+                self.assertEqual(discover_drive_remotes(shutil.which('rclone')), ['google:'])
+
+    @unittest.skipUnless(shutil.which('rclone'), 'rclone is not installed')
+    def test_real_rclone_copy_preview_and_remote_only_file(self):
+        with tempfile.TemporaryDirectory(prefix='rclone copy ') as base:
+            src, dst = Path(base) / 'source folder', Path(base) / 'destination folder'
+            src.mkdir()
+            dst.mkdir()
+            (src / 'file name.txt').write_text('new contents', encoding='utf-8')
+            (dst / 'remote only.txt').write_text('keep', encoding='utf-8')
+            binary = shutil.which('rclone')
+            with patch.dict(os.environ, {'RCLONE_CONFIG': str(Path(base) / 'isolated.conf')}):
+                for dry_run in (True, False):
+                    result = subprocess.run(copy_command(binary, str(src), str(dst), dry_run),
+                                            capture_output=True, text=True, timeout=30)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual((dst / 'file name.txt').exists(), not dry_run)
+                    self.assertEqual((dst / 'remote only.txt').read_text(encoding='utf-8'), 'keep')
+                restore = Path(base) / 'restore folder'
+                result = subprocess.run(copy_command(binary, str(dst), str(restore)),
+                                        capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((restore / 'file name.txt').read_text(encoding='utf-8'), 'new contents')
+                self.assertEqual((restore / 'remote only.txt').read_text(encoding='utf-8'), 'keep')
 
     @unittest.skipIf(sys.platform == 'win32', 'Unix shebang test; Windows path/GUI needs separate acceptance')
     def test_copy_to_fake_drive_does_not_delete_existing_files(self):

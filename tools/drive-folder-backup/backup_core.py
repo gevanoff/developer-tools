@@ -80,7 +80,7 @@ def resolve_rclone() -> str:
 def discover_drive_remotes(binary: str) -> list[str]:
     try:
         result = subprocess.run(
-            [binary, "listremotes", "--type", "drive", "--exact"],
+            [binary, "listremotes", "--long"],
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20,
             check=False, stdin=subprocess.DEVNULL,
         )
@@ -88,7 +88,12 @@ def discover_drive_remotes(binary: str) -> list[str]:
         raise BackupError(f"Cannot query rclone configuration: {exc}") from exc
     if result.returncode:
         raise BackupError(f"rclone listremotes failed (exit {result.returncode}): {result.stderr.strip()[:400]}")
-    return sorted({line.strip() for line in result.stdout.splitlines() if re.fullmatch(r"[^:\r\n/\\]+:", line.strip())})
+    remotes = set()
+    for line in result.stdout.splitlines():
+        fields = line.strip().rsplit(maxsplit=1)
+        if len(fields) == 2 and fields[1] == "drive" and re.fullmatch(r"[^:\r\n/\\]+:", fields[0]):
+            remotes.add(fields[0])
+    return sorted(remotes)
 
 
 def copy_command(binary: str, source: str, target: str, dry_run: bool = False) -> list[str]:

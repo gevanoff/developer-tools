@@ -45,7 +45,7 @@ The source directory's contents appear *inside* that destination. The path hash 
 - Backups execute in a background thread, showing transfer log lines and supporting Cancel. Cancel terminates the active rclone process, leaving completed uploads in Drive; subsequent Back Up retries incrementally.
 - Google Drive storage limits, network interruptions, API quotas, and file changes during a transfer can cause partial results. Check status/log; a zero exit code means rclone completed without reporting an error, **not** a separately verified restore. Test a restore before relying on this as your only backup.
 
-Settings (no secrets) live under `%LOCALAPPDATA%\DeveloperTools\DriveFolderBackup\settings.json`; run logs are in its `logs` directory. If settings are corrupt, the tool reports the problem instead of overwriting them. Sensitive filenames and local source paths may appear in the logs. Do not publish them or rclone's configuration file.
+Settings (no secrets) live under `%LOCALAPPDATA%\DeveloperTools\DriveFolderBackup\settings.json`; run logs are in its `logs` directory. Destination changes are saved when the window closes. If saving fails, the window stays open so you can resolve the problem and retry. If settings are corrupt, the tool reports the problem instead of overwriting them. Sensitive filenames and local source paths may appear in the logs. Do not publish them or rclone's configuration file.
 
 ## Tests
 
@@ -53,4 +53,4 @@ Settings (no secrets) live under `%LOCALAPPDATA%\DeveloperTools\DriveFolderBacku
 py -3 -m unittest discover -s tests -v
 ```
 
-The tests cover stable source mapping, collision separation, remote-root validation, argument safety with spaces, corrupt settings, atomic save, Drive-only remote discovery, and copy behavior with a fake local destination. Live Windows GUI interaction and real Google Drive upload still need acceptance testing on a Windows workstation.
+The tests cover stable source mapping, remote-root validation, settings persistence and errors, Drive-only remote discovery, and stopping a child on a log failure. Where rclone is installed, tests also use an isolated configuration and temporary local folders to check discovery, preview, and non-deleting copy. Live Windows GUI interaction and real Google Drive upload still need acceptance testing on a Windows workstation.

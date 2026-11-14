@@ -18,6 +18,26 @@ from backup_core import (
 )
 
 
+def stop_and_reap(process: subprocess.Popen) -> None:
+    """Keep ownership of a child until it has exited, even if logging fails."""
+    if process.poll() is None:
+        try:
+            process.terminate()
+        except OSError:
+            pass  # It may have exited between poll and terminate.
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            try:
+                process.kill()
+            except OSError:
+                pass
+            # Do not report completion or discard the handle while the child lives.
+            process.wait()
+    else:
+        process.wait()
+
+
 class BackupWindow:
     def __init__(self, window: tk.Tk):
         self.window = window
@@ -232,14 +252,22 @@ class BackupWindow:
                     target = destination(remote, root, computer, folder)
                     emit(f"Target: {target}")
                     argv = copy_command(self.rclone, folder, target, dry_run)
+                    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
                     try:
-                        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
                         process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                                    stdin=subprocess.DEVNULL, text=True, encoding="utf-8",
                                                    errors="replace", bufsize=1, creationflags=flags)
-                        self.process = process
-                        if self.stop_requested.is_set():
-                            process.terminate()
+                    except OSError as exc:
+                        failures += 1
+                        emit(f"ERROR: Could not start rclone: {exc}")
+                        continue
+                    self.process = process
+                    try:
+                        if self.stop_requested.is_set() and process.poll() is None:
+                            try:
+                                process.terminate()
+                            except OSError:
+                                pass
                         assert process.stdout is not None
                         for line in process.stdout:
                             emit(line)
@@ -249,11 +277,11 @@ class BackupWindow:
                             emit(f"ERROR: rclone exited {rc} for {folder}")
                         else:
                             completed += 1
-                    except OSError as exc:
-                        failures += 1
-                        emit(f"ERROR: Could not start rclone: {exc}")
                     finally:
+                        stop_and_reap(process)
                         self.process = None
+                        if process.stdout is not None:
+                            process.stdout.close()
                 state = "Cancelled" if self.stop_requested.is_set() else (
                     "Failed" if failures else ("Preview complete" if dry_run else "Backup complete"))
                 emit(f"{state}: {completed} successful, {failures} failed; {len(folders)} selected.")
@@ -287,15 +315,25 @@ class BackupWindow:
                     self.status_var.set(str(payload))
                     self.set_running(False)
                     if self.close_requested:
-                        self.window.destroy()
-                        return
+                        self.close_requested = False
+                        if self.close_when_idle():
+                            return
         except queue.Empty:
             pass
         self.window.after(100, self.poll)
 
+    def close_when_idle(self) -> bool:
+        try:
+            self.persist()
+        except OSError as exc:
+            messagebox.showerror("Settings not saved", str(exc), parent=self.window)
+            return False
+        self.window.destroy()
+        return True
+
     def close(self) -> None:
         if self.worker is None:
-            self.window.destroy()
+            self.close_when_idle()
         elif messagebox.askyesno("Cancel backup?", "Stop the active transfer and close?", parent=self.window):
             self.close_requested = True
             self.cancel()
